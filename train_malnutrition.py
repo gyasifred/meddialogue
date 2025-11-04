@@ -36,7 +36,7 @@ from meddialogue import (
     TaskConfig,
     SafetyConfig,
     TrainingConfig,
-    DataMultiplicationConfig,
+    ConversationConfig,
     OutputFormat,
     PIISensitivity
 )
@@ -441,7 +441,7 @@ def create_training_config(
     )
 
 
-def create_mult_config(
+def create_conversation_config(
     single_turn_ratio: float = 0.5,
     max_multi_turns: int = 12,
     validation_split: float = 0.0,  # Framework handles split internally
@@ -449,7 +449,7 @@ def create_mult_config(
     include_typos: bool = True,
     typo_ratio: float = 0.15,
     max_seq_length: int = 16384
-) -> DataMultiplicationConfig:
+) -> ConversationConfig:
     """
     Create data multiplication configuration (v1.0.0).
     
@@ -458,7 +458,7 @@ def create_mult_config(
     """
     context_window_chars = max_seq_length * 4
     
-    return DataMultiplicationConfig(
+    return ConversationConfig(
         single_turn_ratio=single_turn_ratio,
         max_multi_turns=max_multi_turns,
         include_typos=include_typos,
@@ -806,7 +806,7 @@ NEW in v1.0.0:
     )
     logger.info(f"✓ Training config created")
     
-    mult_config = create_mult_config(
+    conversation_config = create_conversation_config(
         single_turn_ratio=args.single_turn_ratio,
         max_multi_turns=args.max_multi_turns,
         validation_split=args.validation_split,  # Framework handles split
@@ -834,7 +834,7 @@ NEW in v1.0.0:
                 model_type=model_type,
                 safety_config=safety_config,
                 training_config=training_config,
-                mult_config=mult_config,
+                conversation_config=conversation_config,
                 output_dir=os.path.join(args.output, model_type),
                 enable_safety=not args.disable_safety,
                 cuda_device=args.cuda_device,
