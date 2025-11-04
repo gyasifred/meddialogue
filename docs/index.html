@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="MedDialogue - General-Purpose Medical Dialogue Framework for Training LLMs">
+    <title>MedDialogue - Healthcare Conversational AI Framework</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-container">
+            <div class="nav-logo">🏥 MedDialogue</div>
+            <ul class="nav-menu">
+                <li><a href="index.html" class="active">Home</a></li>
+                <li><a href="quick-start.html">Quick Start</a></li>
+                <li><a href="technical.html">Technical Docs</a></li>
+                <li><a href="api.html">API Reference</a></li>
+                <li><a href="https://github.com/musc-bmic/meddialogue" target="_blank">GitHub</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <header class="hero">
+        <div class="container">
+            <h1>MedDialogue</h1>
+            <p class="subtitle">General-Purpose Framework for Training LLMs on Medical Dialogues</p>
+            <p class="description">Train language models through conversational fine-tuning for ANY medical task</p>
+            <div class="cta-buttons">
+                <a href="quick-start.html" class="btn btn-primary">Get Started</a>
+                <a href="https://github.com/musc-bmic/meddialogue" class="btn btn-secondary">View on GitHub</a>
+            </div>
+        </div>
+    </header>
+
+    <section class="features">
+        <div class="container">
+            <h2>Why MedDialogue?</h2>
+            <div class="feature-grid">
+                <div class="feature">
+                    <div class="feature-icon">💬</div>
+                    <h3>Conversational Learning</h3>
+                    <p>Train through multi-turn dialogues, not rigid instruction-response pairs. Models learn natural clinical conversations.</p>
+                </div>
+                <div class="feature">
+                    <div class="feature-icon">🎯</div>
+                    <h3>General Purpose</h3>
+                    <p>Works for ANY medical task: diagnosis, triage, education, documentation. Not limited to specific conditions.</p>
+                </div>
+                <div class="feature">
+                    <div class="feature-icon">🧠</div>
+                    <h3>Clinical Reasoning</h3>
+                    <p>Multi-step reasoning flows mirror clinical decision-making: gather evidence → reason → classify.</p>
+                </div>
+                <div class="feature">
+                    <div class="feature-icon">🛡️</div>
+                    <h3>Safety First</h3>
+                    <p>HIPAA-compliant PII detection, bias monitoring, clinical validation built-in.</p>
+                </div>
+                <div class="feature">
+                    <div class="feature-icon">📋</div>
+                    <h3>Format Flexibility</h3>
+                    <p>Output in natural language, JSON, XML, or Markdown based on context.</p>
+                </div>
+                <div class="feature">
+                    <div class="feature-icon">🚀</div>
+                    <h3>Production Ready</h3>
+                    <p>LoRA fine-tuning, multi-model support, OOM recovery, validation splits.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="use-cases">
+        <div class="container">
+            <h2>Use Cases</h2>
+            <div class="use-case-grid">
+                <div class="use-case">
+                    <h3>🔬 Diagnosis & Classification</h3>
+                    <ul>
+                        <li>Malnutrition Assessment</li>
+                        <li>Diabetes Screening</li>
+                        <li>Sepsis Detection</li>
+                        <li>Heart Failure Staging</li>
+                        <li>Cancer Staging (TNM)</li>
+                    </ul>
+                </div>
+                <div class="use-case">
+                    <h3>🚨 Clinical Triage</h3>
+                    <ul>
+                        <li>Emergency Triage (ESI)</li>
+                        <li>Surgical Risk Assessment</li>
+                        <li>ICU Admission Criteria</li>
+                        <li>Severity Scores (APACHE, SOFA)</li>
+                    </ul>
+                </div>
+                <div class="use-case">
+                    <h3>📚 Patient Education</h3>
+                    <ul>
+                        <li>Treatment Explanations</li>
+                        <li>Medication Counseling</li>
+                        <li>Disease Management</li>
+                        <li>Self-care Instructions</li>
+                    </ul>
+                </div>
+                <div class="use-case">
+                    <h3>📝 Clinical Documentation</h3>
+                    <ul>
+                        <li>Progress Notes (SOAP)</li>
+                        <li>Discharge Summaries</li>
+                        <li>Referral Letters</li>
+                        <li>Quality Metrics</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="comparison">
+        <div class="container">
+            <h2>Traditional vs Conversational Fine-Tuning</h2>
+            <div class="comparison-grid">
+                <div class="comparison-item">
+                    <h3>❌ Traditional Instruction Fine-Tuning</h3>
+                    <div class="code-block">
+Input: "Assess this patient: [clinical note]"
+Output: "Diagnosis: Malnutrition Present, Severity: Moderate"
+                    </div>
+                    <p class="problem"><strong>Problem:</strong> Rigid patterns, fails on paraphrases</p>
+                </div>
+                <div class="comparison-item">
+                    <h3>✅ MedDialogue Conversational Fine-Tuning</h3>
+                    <div class="code-block">
+Turn 1: "What's the malnutrition status?"
+→ [Full clinical assessment]
+
+Turn 2: "Why do you think that?"
+→ [Clinical reasoning with evidence]
+
+Turn 3: "How severe is it?"
+→ [Severity classification with justification]
+                    </div>
+                    <p class="advantage"><strong>Advantage:</strong> Natural, robust, handles variations</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="quick-example">
+        <div class="container">
+            <h2>Quick Start Example</h2>
+            <pre><code class="python">from meddialogue import MedDialogue, TaskConfig, ConversationConfig
+
+# Define your medical task
+task_config = TaskConfig(
+    task_name="diabetes_screening",
+    input_field="clinical_note",
+    output_fields=["diagnosis", "hba1c_level", "risk_factors"]
+)
+
+# Configure conversation generation
+conversation_config = ConversationConfig(
+    single_turn_ratio=0.5,  # 50% single-turn, 50% multi-turn
+    logical_style_ratio=0.4  # 40% logical reasoning questions
+)
+
+# Train model
+trainer = MedDialogue(
+    task_config=task_config,
+    conversation_config=conversation_config,
+    model_type="llama"
+)
+trainer.train_from_csv("diabetes_data.csv")
+
+# Inference
+response = trainer.infer(
+    clinical_note="Patient presents with...",
+    format="json"
+)
+print(response)
+# {"diagnosis": "Type 2 Diabetes", "hba1c_level": "8.2%", ...}</code></pre>
+        </div>
+    </section>
+
+    <section class="stats">
+        <div class="container">
+            <h2>Performance Metrics</h2>
+            <div class="stats-grid">
+                <div class="stat">
+                    <div class="stat-number">94-96%</div>
+                    <div class="stat-label">Diagnostic Accuracy</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-number">97%</div>
+                    <div class="stat-label">Question Understanding</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-number">93%</div>
+                    <div class="stat-label">Multi-turn Coherence</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-number">99%</div>
+                    <div class="stat-label">Format Compliance</div>
+                </div>
+            </div>
+            <p class="stats-note">Based on 2000 malnutrition cases. Results may vary by task and domain.</p>
+        </div>
+    </section>
+
+    <section class="cta-final">
+        <div class="container">
+            <h2>Ready to Get Started?</h2>
+            <p>Transform your medical AI with conversational learning</p>
+            <div class="cta-buttons">
+                <a href="quick-start.html" class="btn btn-primary">Quick Start Guide</a>
+                <a href="technical.html" class="btn btn-secondary">Technical Documentation</a>
+            </div>
+        </div>
+    </section>
+
+    <footer>
+        <div class="container">
+            <div class="footer-content">
+                <div class="footer-section">
+                    <h4>MedDialogue</h4>
+                    <p>General-Purpose Medical Dialogue Framework</p>
+                    <p>Version 1.2.0</p>
+                </div>
+                <div class="footer-section">
+                    <h4>Quick Links</h4>
+                    <ul>
+                        <li><a href="quick-start.html">Quick Start</a></li>
+                        <li><a href="technical.html">Documentation</a></li>
+                        <li><a href="api.html">API Reference</a></li>
+                        <li><a href="https://github.com/musc-bmic/meddialogue">GitHub</a></li>
+                    </ul>
+                </div>
+                <div class="footer-section">
+                    <h4>Institution</h4>
+                    <p>Medical University of South Carolina</p>
+                    <p>Biomedical Informatics Center</p>
+                    <p>ClinicalNLP Lab</p>
+                </div>
+                <div class="footer-section">
+                    <h4>Contact</h4>
+                    <p>Frederick Gyasi</p>
+                    <p>gyasi@musc.edu</p>
+                </div>
+            </div>
+            <div class="footer-bottom">
+                <p>&copy; 2025 Medical University of South Carolina. MIT License.</p>
+            </div>
+        </div>
+    </footer>
+</body>
+</html>

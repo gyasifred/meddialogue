@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API Reference - MedDialogue</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-container">
+            <div class="nav-logo">🏥 MedDialogue</div>
+            <ul class="nav-menu">
+                <li><a href="index.html">Home</a></li>
+                <li><a href="quick-start.html">Quick Start</a></li>
+                <li><a href="technical.html">Technical Docs</a></li>
+                <li><a href="api.html" class="active">API Reference</a></li>
+                <li><a href="https://github.com/musc-bmic/meddialogue" target="_blank">GitHub</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <section style="padding: 4rem 0;">
+        <div class="container">
+            <h1>API Reference</h1>
+
+            <h2>Core Classes</h2>
+
+            <h3>MedDialogue</h3>
+            <pre><code>class MedDialogue:
+    """Main interface for training and inference."""
+
+    def __init__(
+        self,
+        task_config: TaskConfig,
+        model_type: str = "llama",
+        conversation_config: Optional[ConversationConfig] = None,
+        safety_config: Optional[SafetyConfig] = None,
+        training_config: Optional[TrainingConfig] = None,
+        output_dir: str = "./output",
+        enable_safety: bool = True,
+        cuda_device: int = 0
+    )
+
+    def train_from_csv(
+        self,
+        csv_path: str,
+        epochs: int = 3,
+        batch_size: int = 2
+    ) -> Dict[str, Any]
+
+    def infer(
+        self,
+        clinical_note: str,
+        question: Optional[str] = None,
+        format: str = "text"
+    ) -> Union[str, Dict]</code></pre>
+
+            <h3>TaskConfig</h3>
+            <pre><code>class TaskConfig:
+    """Configuration for medical task."""
+
+    task_name: str
+    task_description: str
+    input_field: str = "clinical_note"
+    output_fields: List[str] = ["diagnosis"]
+    question_templates: Dict[str, List[str]] = {}
+    output_formats: List[OutputFormat] = [TEXT, JSON]
+    medical_terminology: Dict[str, List[str]] = {}
+    severity_levels: List[str] = ["mild", "moderate", "severe"]</code></pre>
+
+            <h3>ConversationConfig</h3>
+            <pre><code>class ConversationConfig:
+    """Configuration for conversation generation."""
+
+    single_turn_ratio: float = 0.5
+    max_multi_turns: int = 10
+    include_typos: bool = True
+    typo_ratio: float = 0.15
+    validation_split: float = 0.0
+    logical_style_ratio: float = 0.4
+    include_followup_questions: bool = True</code></pre>
+
+            <h3>SafetyConfig</h3>
+            <pre><code>class SafetyConfig:
+    """Configuration for safety checks."""
+
+    enable_pii_detection: bool = True
+    pii_sensitivity: PIISensitivity = PIISensitivity.HIGH
+    max_pii_threshold: float = 0.7
+    enable_bias_monitoring: bool = True
+    bias_demographic_fields: List[str] = ["age", "gender", "race"]
+    enable_clinical_validation: bool = True
+    require_icd_validation: bool = False
+    block_on_safety_failure: bool = False
+    log_safety_events: bool = True
+    custom_pii_patterns: Dict[str, str] = {}
+    custom_medical_terms: List[str] = []</code></pre>
+
+            <h2>Enums</h2>
+
+            <h3>OutputFormat</h3>
+            <pre><code>class OutputFormat(Enum):
+    TEXT = "text"
+    JSON = "json"
+    XML = "xml"
+    MARKDOWN = "markdown"</code></pre>
+
+            <h3>PIISensitivity</h3>
+            <pre><code>class PIISensitivity(Enum):
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    MAXIMUM = "maximum"</code></pre>
+
+            <h2>Complete Documentation</h2>
+            <p>For complete API documentation, see:</p>
+            <ul>
+                <li><a href="https://github.com/musc-bmic/meddialogue/blob/main/meddialogue/README.md">Package README</a></li>
+                <li><a href="https://github.com/musc-bmic/meddialogue">Source Code</a></li>
+            </ul>
+        </div>
+    </section>
+
+    <footer>
+        <div class="container">
+            <div class="footer-bottom">
+                <p>&copy; 2025 Medical University of South Carolina. MIT License.</p>
+            </div>
+        </div>
+    </footer>
+</body>
+</html>
