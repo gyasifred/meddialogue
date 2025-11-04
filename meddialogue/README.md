@@ -4,11 +4,63 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Institution: MUSC](https://img.shields.io/badge/Institution-MUSC-green.svg)](https://medicine.musc.edu/departments/biomedical-informatics)
 
-**A production-ready framework for fine-tuning large language models on healthcare conversations using dialogue-based learning, data multiplication, and safety guardrails.**
+**A production-ready framework for fine-tuning large language models on healthcare conversations using dialogue-based learning, conversation generation, and safety guardrails.**
 
 ---
 
 ## 🎯 Core Mission
+
+## 🎯 General-Purpose Medical Dialogue Framework
+
+**MedDialogue is NOT just for malnutrition** – it's a general-purpose framework for training LLMs on ANY medical dialogue task.
+
+### Use Cases
+
+MedDialogue can be applied to ANY medical dialogue scenario:
+
+#### Diagnosis & Classification
+- **Malnutrition Assessment** (included example)
+- **Diabetes Screening**: Evaluate HbA1c, risk factors, diagnostic criteria
+- **Sepsis Detection**: Identify SIRS criteria, organ dysfunction
+- **Heart Failure Staging**: NYHA classification, ejection fraction analysis
+- **Cancer Staging**: TNM classification, biomarker interpretation
+
+#### Clinical Triage
+- **Emergency Triage**: ESI levels, acuity assessment
+- **Surgical Risk**: ASA classification, pre-operative evaluation
+- **ICU Admission**: Severity scores (APACHE, SOFA)
+
+#### Patient Education
+- **Treatment Explanations**: Convert clinical notes to patient-friendly language
+- **Medication Counseling**: Drug interactions, side effects, compliance
+- **Disease Management**: Self-care instructions, warning signs
+
+#### Clinical Documentation
+- **Progress Notes**: Generate SOAP notes from clinical data
+- **Discharge Summaries**: Synthesize hospitalizations
+- **Referral Letters**: Create specialist referrals
+
+#### Research & Analytics
+- **Literature Review**: Summarize clinical trials, extract outcomes
+- **Case Extraction**: Identify cohorts from EHR notes
+- **Quality Metrics**: Calculate adherence to guidelines
+
+### What Makes It General-Purpose?
+
+1. **Configurable Tasks**: Define ANY medical task with `TaskConfig`
+2. **Flexible Outputs**: Specify ANY output fields (diagnosis, severity, recommendations, etc.)
+3. **Custom Questions**: Provide domain-specific question templates
+4. **Multiple Formats**: Output in text, JSON, XML, or Markdown
+5. **Safety Modules**: Adapt PII patterns, medical terms, diagnostic codes to your domain
+6. **Model Agnostic**: Works with Llama, Phi-4, Mistral, Qwen families
+
+### The Malnutrition Example
+
+The `train_malnutrition.py` and `evaluate_malnutrition.py` scripts are **demonstration examples** showing MedDialogue's capabilities. The actual package (`meddialogue/`) contains NO malnutrition-specific code – it's all general-purpose.
+
+**To use MedDialogue for your task**: Simply change the `TaskConfig` to match your domain. That's it.
+
+---
 
 **MedDialogue revolutionizes healthcare AI fine-tuning by focusing on conversational dialogue rather than traditional instruction-based approaches.**
 
@@ -53,7 +105,7 @@ Assistant: [Provides severity classification with justification]
 - **Intent recognition**: Understands equivalent questions ("How severe?" = "What's the severity?" = "Grade the severity")
 - **Follow-up handling**: Natural progression through diagnostic reasoning
 
-### 🔄 Data Multiplication System
+### 🔄 Conversation Generation System
 - **Smart multiplication**: Generate 4-10 training examples from each input
 - **Balanced distribution**: 50% single-turn, 50% multi-turn conversations
 - **Format variety**: Text, JSON, XML, Markdown outputs in configurable ratios
@@ -263,9 +315,9 @@ clinical_note,diagnosis,severity,recommendations,reasoning
 ### Conversational Training Configuration
 
 ```python
-from meddialogue import DataMultiplicationConfig
+from meddialogue import ConversationConfig
 
-mult_config = DataMultiplicationConfig(
+conversation_config = ConversationConfig(
     multiplication_factor=4,        # Generate 4 examples per input
     single_turn_ratio=0.5,          # 50% single-turn, 50% multi-turn
     max_multi_turns=5,              # Up to 5 follow-up questions
@@ -279,7 +331,7 @@ mult_config = DataMultiplicationConfig(
 
 trainer = MedDialogue(
     task_config=task_config,
-    mult_config=mult_config,
+    conversation_config=conversation_config,
     model_type="llama"
 )
 ```
@@ -633,8 +685,8 @@ training_config.fp16 = False
 # Increase batch size if memory allows
 training_config.batch_size = 4
 
-# Reduce data multiplication
-mult_config.multiplication_factor = 2  # From default 4
+# Reduce conversation generation
+conversation_config.multiplication_factor = 2  # From default 4
 ```
 
 ### PII False Positives
@@ -656,13 +708,13 @@ This is why MedDialogue uses conversational training! If traditional instruction
 
 ```python
 # Increase multiplication factor for more diverse examples
-mult_config.multiplication_factor = 6
+conversation_config.multiplication_factor = 6
 
 # Add more multi-turn conversations
-mult_config.single_turn_ratio = 0.3  # 70% multi-turn
+conversation_config.single_turn_ratio = 0.3  # 70% multi-turn
 
 # Increase template diversity
-mult_config.max_templates_per_category = 15
+conversation_config.max_templates_per_category = 15
 ```
 
 ---
@@ -680,7 +732,7 @@ trainer = MedDialogue(
     model_type: str = "llama",
     safety_config: Optional[SafetyConfig] = None,
     training_config: Optional[TrainingConfig] = None,
-    mult_config: Optional[DataMultiplicationConfig] = None,
+    conversation_config: Optional[ConversationConfig] = None,
     output_dir: str = "./output",
     enable_safety: bool = True,
     cuda_device: int = 0
