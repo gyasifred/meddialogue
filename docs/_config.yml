@@ -1,0 +1,7 @@
+title: MedDialogue
+description: General-Purpose Medical Dialogue Framework for Training LLMs
+theme: jekyll-theme-minimal
+show_downloads: true
+github:
+  repository_url: https://github.com/musc-bmic/meddialogue
+  owner_name: MUSC Biomedical Informatics Center

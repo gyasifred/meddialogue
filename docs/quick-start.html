@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quick Start - MedDialogue</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-container">
+            <div class="nav-logo">🏥 MedDialogue</div>
+            <ul class="nav-menu">
+                <li><a href="index.html">Home</a></li>
+                <li><a href="quick-start.html" class="active">Quick Start</a></li>
+                <li><a href="technical.html">Technical Docs</a></li>
+                <li><a href="api.html">API Reference</a></li>
+                <li><a href="https://github.com/musc-bmic/meddialogue" target="_blank">GitHub</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <section style="padding: 4rem 0;">
+        <div class="container">
+            <h1>Quick Start Guide</h1>
+
+            <h2>Installation</h2>
+            <pre><code># Clone repository
+git clone https://github.com/musc-bmic/meddialogue.git
+cd meddialogue
+
+# Create virtual environment
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Install package
+pip install -e .</code></pre>
+
+            <h2>Basic Training</h2>
+            <pre><code>from meddialogue import MedDialogue, TaskConfig, ConversationConfig
+
+# 1. Define your medical task
+task_config = TaskConfig(
+    task_name="diabetes_screening",
+    input_field="clinical_note",
+    output_fields=["diagnosis", "hba1c_level", "risk_factors"]
+)
+
+# 2. Configure conversation generation
+conversation_config = ConversationConfig(
+    single_turn_ratio=0.5,
+    logical_style_ratio=0.4
+)
+
+# 3. Initialize trainer
+trainer = MedDialogue(
+    task_config=task_config,
+    conversation_config=conversation_config,
+    model_type="llama"
+)
+
+# 4. Train
+trainer.train_from_csv("diabetes_data.csv", epochs=3)
+
+# 5. Inference
+response = trainer.infer(
+    clinical_note="Patient presents with...",
+    format="json"
+)</code></pre>
+
+            <h2>CSV Format</h2>
+            <p>Your CSV should have:</p>
+            <ul>
+                <li><strong>Input field</strong> (e.g., clinical_note): Clinical text</li>
+                <li><strong>Output fields</strong> (e.g., diagnosis, severity): Ground truth labels</li>
+            </ul>
+
+            <h2>Next Steps</h2>
+            <ul>
+                <li><a href="technical.html">Read the technical documentation</a></li>
+                <li><a href="api.html">Browse the API reference</a></li>
+                <li><a href="https://github.com/musc-bmic/meddialogue">Check out examples on GitHub</a></li>
+            </ul>
+        </div>
+    </section>
+
+    <footer>
+        <div class="container">
+            <div class="footer-bottom">
+                <p>&copy; 2025 Medical University of South Carolina. MIT License.</p>
+            </div>
+        </div>
+    </footer>
+</body>
+</html>

@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Technical Documentation - MedDialogue</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-container">
+            <div class="nav-logo">🏥 MedDialogue</div>
+            <ul class="nav-menu">
+                <li><a href="index.html">Home</a></li>
+                <li><a href="quick-start.html">Quick Start</a></li>
+                <li><a href="technical.html" class="active">Technical Docs</a></li>
+                <li><a href="api.html">API Reference</a></li>
+                <li><a href="https://github.com/musc-bmic/meddialogue" target="_blank">GitHub</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <section style="padding: 4rem 0;">
+        <div class="container">
+            <h1>Technical Documentation</h1>
+
+            <p>For comprehensive technical documentation, please refer to:</p>
+            <ul>
+                <li><a href="https://github.com/musc-bmic/meddialogue/blob/main/DOCUMENTATION.md">DOCUMENTATION.md</a> - Complete technical reference</li>
+                <li><a href="https://github.com/musc-bmic/meddialogue/blob/main/meddialogue/README.md">Package README</a> - Detailed usage guide</li>
+                <li><a href="https://github.com/musc-bmic/meddialogue">GitHub Repository</a> - Source code and examples</li>
+            </ul>
+
+            <h2>Key Topics</h2>
+
+            <h3>Architecture</h3>
+            <p>MedDialogue consists of several modular components:</p>
+            <ul>
+                <li><strong>TaskConfig</strong>: Define your medical task</li>
+                <li><strong>ConversationConfig</strong>: Control conversation generation</li>
+                <li><strong>DataPrep</strong>: Prepare training data</li>
+                <li><strong>Trainer</strong>: Fine-tune models with LoRA</li>
+                <li><strong>InferencePipeline</strong>: Run inference</li>
+                <li><strong>SafetyChecker</strong>: PII, bias, validation</li>
+            </ul>
+
+            <h3>Data Preparation Pipeline</h3>
+            <p>The pipeline transforms CSV rows into conversational training examples:</p>
+            <ol>
+                <li>Load and validate CSV data</li>
+                <li>Generate question variations (grammatical + logical)</li>
+                <li>Format responses (text, JSON, XML, Markdown)</li>
+                <li>Create single-turn or multi-turn conversations</li>
+                <li>Apply safety checks</li>
+            </ol>
+
+            <h3>Question Generation</h3>
+            <p>16 question styles across 2 categories:</p>
+            <ul>
+                <li><strong>Grammatical</strong> (7 styles): Paraphrases of the same question</li>
+                <li><strong>Logical</strong> (9 styles): Multi-field reasoning combinations</li>
+            </ul>
+
+            <h3>Safety & Compliance</h3>
+            <ul>
+                <li><strong>PII Detection</strong>: HIPAA-compliant PHI detection</li>
+                <li><strong>Bias Monitoring</strong>: Demographic distribution analysis</li>
+                <li><strong>Clinical Validation</strong>: Medical terminology and code validation</li>
+            </ul>
+
+            <h2>Configuration Reference</h2>
+            <p>See <a href="api.html">API Reference</a> for detailed configuration options.</p>
+        </div>
+    </section>
+
+    <footer>
+        <div class="container">
+            <div class="footer-bottom">
+                <p>&copy; 2025 Medical University of South Carolina. MIT License.</p>
+            </div>
+        </div>
+    </footer>
+</body>
+</html>
