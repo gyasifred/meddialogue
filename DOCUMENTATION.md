@@ -3,241 +3,177 @@
 ## Table of Contents
 
 1. [Overview](#overview)
-2. [Architecture](#architecture)
-3. [Data Preparation Pipeline](#data-preparation-pipeline)
-4. [Question Generation Strategy](#question-generation-strategy)
-5. [Conversation Generation](#conversation-generation)
-6. [Training Pipeline](#training-pipeline)
-7. [Inference & Multi-Step Reasoning](#inference--multi-step-reasoning)
+2. [Installation](#installation)
+3. [Quick Start](#quick-start)
+4. [How Conversations Are Generated](#how-conversations-are-generated)
+5. [Configuration Guide](#configuration-guide)
+6. [Malnutrition Example Explained](#malnutrition-example-explained)
+7. [Creating Your Own Task](#creating-your-own-task)
 8. [Safety & Compliance](#safety--compliance)
-9. [Configuration Reference](#configuration-reference)
-10. [Advanced Usage](#advanced-usage)
+9. [Training & Inference](#training--inference)
+10. [Troubleshooting](#troubleshooting)
 
 ---
 
 ## Overview
 
-**MedDialogue** is a general-purpose framework for training Large Language Models (LLMs) on ANY medical dialogue task using conversational fine-tuning. Unlike traditional instruction-based fine-tuning, MedDialogue trains models through multi-turn conversations that mirror real clinical interactions.
+**MedDialogue** is a general-purpose framework for training Large Language Models on ANY medical dialogue task through conversational fine-tuning.
 
 ### Key Principles
 
-1. **Conversational Learning**: Models learn through dialogue, not rigid instruction-response pairs
-2. **Clinical Reasoning**: Multi-step reasoning flows (evidence → diagnosis → classification)
-3. **Format Flexibility**: Output in text, JSON, XML, or Markdown based on context
-4. **Safety First**: HIPAA-compliant PII detection, bias monitoring, clinical validation
-5. **General Purpose**: Works for ANY medical task (diagnosis, triage, education, etc.)
+1. **1:1 Data Mapping**: Each clinical note → ONE training conversation (no artificial multiplication)
+2. **Natural Variation**: 16 question styles create diversity without data duplication
+3. **Conversational Learning**: Multi-turn dialogues mirror real clinical interactions
+4. **Format Flexibility**: Output in TEXT, JSON, XML, or Markdown
+5. **Safety First**: HIPAA-compliant PII detection, bias monitoring
+6. **General Purpose**: Works for ANY medical task
 
-### Why MedDialogue?
+### Why Conversational Fine-Tuning?
 
-**Traditional Approach (Instruction Fine-Tuning)**:
+**Traditional Instruction Fine-Tuning** ❌:
 ```
-Input: "Diagnose this patient: [clinical note]"
-Output: "Malnutrition Present, Moderate severity"
+Input: "Diagnose: [note]"
+Output: "Malnutrition Present"
 ```
-❌ Rigid, brittle, fails on paraphrase
+- Fails on paraphrase
+- Rigid prompt dependency
+- No multi-turn context
 
-**MedDialogue Approach (Conversational Fine-Tuning)**:
+**MedDialogue Conversational Fine-Tuning** ✅:
 ```
-Turn 1: "What's the malnutrition status?" → [Full assessment]
-Turn 2: "Why do you think that?" → [Clinical reasoning]
-Turn 3: "How severe?" → [Severity with evidence]
+Turn 1: "What's the status?" → [Assessment]
+Turn 2: "Why?" → [Reasoning]
+Turn 3: "How severe?" → [Severity]
 ```
-✅ Natural, robust, handles variations
+- Robust to variations
+- Natural dialogue
+- Context preservation
 
 ---
 
-## Architecture
+## Installation
 
-### System Components
+### Requirements
 
+**System**:
+- Python 3.8+
+- CUDA GPU (24GB+ VRAM recommended)
+- 32GB+ RAM
+- Linux or macOS (Windows via WSL2)
+
+**Dependencies**:
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                        MedDialogue                          │
-├─────────────────────────────────────────────────────────────┤
-│                                                             │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐    │
-│  │   TaskConfig │  │ConversationConfig│ │SafetyConfig│    │
-│  │              │  │              │  │              │    │
-│  │ - Task def   │  │ - Conv style │  │ - PII check  │    │
-│  │ - Questions  │  │ - Turns      │  │ - Bias mon   │    │
-│  │ - Output fmt │  │ - Typos      │  │ - Validation │    │
-│  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘    │
-│         │                  │                  │            │
-│         └──────────┬───────┴──────────────────┘            │
-│                    ▼                                       │
-│         ┌─────────────────────┐                           │
-│         │     DataPrep        │                           │
-│         │                     │                           │
-│         │ - QuestionCombiner  │                           │
-│         │ - ResponseFormatter │                           │
-│         │ - ConversationGen   │                           │
-│         └──────────┬──────────┘                           │
-│                    ▼                                       │
-│         ┌─────────────────────┐                           │
-│         │  Training Examples  │                           │
-│         │  (Conversations)    │                           │
-│         └──────────┬──────────┘                           │
-│                    ▼                                       │
-│         ┌─────────────────────┐                           │
-│         │   Trainer (LoRA)    │                           │
-│         └──────────┬──────────┘                           │
-│                    ▼                                       │
-│         ┌─────────────────────┐                           │
-│         │   Fine-tuned Model  │                           │
-│         └──────────┬──────────┘                           │
-│                    ▼                                       │
-│         ┌─────────────────────┐                           │
-│         │ InferencePipeline   │                           │
-│         └─────────────────────┘                           │
-│                                                             │
-└─────────────────────────────────────────────────────────────┘
+torch>=2.8.0
+transformers>=4.55.0
+unsloth>=2025.9.7
+peft>=0.17.0
+datasets>=3.6.0
+pandas>=2.3.0
+scikit-learn>=1.7.0
+tqdm
+```
+
+### Install
+
+```bash
+git clone https://github.com/gyasifred/meddialogue.git
+cd meddialogue
+
+python -m venv venv
+source venv/bin/activate
+
+pip install torch transformers datasets unsloth peft trl pandas numpy scikit-learn tqdm
+pip install -e .
+```
+
+### Verify
+
+```bash
+python -c "import meddialogue; print(meddialogue.__version__)"
+# Output: 1.0.0
 ```
 
 ---
 
-## Data Preparation Pipeline
+## Quick Start
 
-### Overview
+### Minimal Example
 
-The data preparation pipeline transforms raw clinical data (CSV rows) into rich conversational training examples. **Important**: MedDialogue uses a **1:1 row-to-example mapping** — each CSV row creates ONE training conversation, not multiple copies.
-
-### Pipeline Stages
-
-#### 1. Data Loading & Validation
 ```python
-from meddialogue import MedDialogue, TaskConfig
+from meddialogue import MedDialogue, TaskConfig, ConversationConfig
 
+# 1. Define task
 task_config = TaskConfig(
-    task_name="malnutrition_assessment",
+    task_name="your_task",
     input_field="clinical_note",
-    output_fields=["diagnosis", "severity", "recommendations"]
+    output_fields=["diagnosis", "severity"],
+    question_templates={
+        'diagnosis': ["What is the diagnosis?", "Assess diagnosis"],
+        'severity': ["What is severity?", "Grade severity"]
+    }
 )
 
-trainer = MedDialogue(task_config=task_config)
-trainer.train_from_csv("data.csv")
+# 2. Configure conversations
+conversation_config = ConversationConfig(
+    single_turn_ratio=0.5,
+    max_multi_turns=3,
+    validation_split=0.2
+)
+
+# 3. Train
+trainer = MedDialogue(
+    task_config=task_config,
+    conversation_config=conversation_config,
+    model_type="llama"
+)
+trainer.train_from_csv("data.csv", epochs=3)
+
+# 4. Infer
+response = trainer.infer("Patient presents...", format="json")
+print(response)
 ```
 
-**What happens**:
-- Loads CSV with pandas
-- Validates required columns exist
-- Checks for missing values
-- Runs safety checks (PII, bias)
+### Data Format
 
-#### 2. Question Generation
+CSV with input field + output fields:
 
-For each row, the system:
-1. Identifies output fields (e.g., diagnosis, severity)
-2. Generates question variations for each field
-3. Combines questions using grammatical OR logical styles
-
-**Example**:
-```python
-# Input fields: diagnosis, severity, recommendations
-# Output questions:
-"What is the diagnosis?"
-"Assess malnutrition status and provide severity"
-"Explain reasoning and recommend treatment"
-```
-
-#### 3. Response Formatting
-
-Responses are formatted in multiple styles:
-- **Natural Language**: Clinical narrative with structure
-- **JSON**: `{"diagnosis": "Present", "severity": "Moderate"}`
-- **XML**: `<assessment><diagnosis>Present</diagnosis>...</assessment>`
-- **Markdown**: Formatted with headers and lists
-
-#### 4. Conversation Structure
-
-Each example becomes either:
-
-**Single-Turn Conversation** (50% by default):
-```
-System: [Role definition]
-User: [Clinical note] + [Combined question]
-Assistant: [Complete response]
-```
-
-**Multi-Turn Conversation** (50% by default):
-```
-System: [Role definition]
-
-Turn 1:
-User: [Clinical note] + [Question 1]
-Assistant: [Response 1]
-
-Turn 2:
-User: [Follow-up question 2]
-Assistant: [Response 2]
-
-Turn 3:
-User: [Follow-up question 3]
-Assistant: [Response 3]
+```csv
+clinical_note,diagnosis,severity
+"Patient with BMI <5th percentile...","Present","moderate"
+"Normal growth...","Absent","null"
 ```
 
 ---
 
-## Question Generation Strategy
+## How Conversations Are Generated
 
-### Question Types
+### Critical Understanding: 1:1 Mapping
 
-MedDialogue generates 16 distinct question styles, divided into two categories:
+**Each CSV row generates exactly ONE training conversation.**
 
-#### Grammatical Variations (7 styles)
-These rephrase the same question grammatically:
+- 100 rows → 100 training examples
+- No data multiplication or duplication
+- Variation comes from 16 question styles, not copying data
 
-1. **Direct**: "What is the diagnosis?"
-2. **Interrogative**: "Is malnutrition present?"
-3. **Imperative**: "Assess malnutrition status"
-4. **Conversational**: "Can you tell me about the malnutrition status?"
-5. **Formal**: "Provide a clinical assessment of malnutrition"
-6. **Clinical Jargon**: "Evaluate for pediatric undernutrition"
-7. **With Typos** (15% of the time): "What is the diagnsois?" (robustness training)
+### Process for Each Row
 
-#### Logical Combinations (9 styles)
-These combine multiple fields in logical order:
-
-1. **Sequential**: "First assess diagnosis, then severity"
-2. **With Evidence**: "Provide diagnosis with clinical evidence"
-3. **With Reasoning**: "Explain diagnosis and your clinical reasoning"
-4. **With Summary**: "Give diagnosis and summarize key findings"
-5. **With Recommendations**: "Diagnose and recommend treatment"
-6. **Comparative**: "Compare current findings to diagnostic criteria"
-7. **Hierarchical**: "Evaluate systematically: assessment → diagnosis → plan"
-8. **Comprehensive**: "Provide complete evaluation with all details"
-9. **Targeted**: "Focus on [specific field]"
-
-### Logical Style Ratio
-
-The `ConversationConfig.logical_style_ratio` controls the mix:
 ```python
-ConversationConfig(
-    logical_style_ratio=0.4  # 40% logical, 60% grammatical
-)
+# Input: 1 CSV row
+row = {
+    'clinical_note': "Patient presents with...",
+    'diagnosis': "Present",
+    'severity': "moderate",
+    'care_plan': "Nutritional supplementation..."
+}
+
+# Output: 1 conversation (either single-turn OR multi-turn)
 ```
 
-**Why this matters**:
-- **Grammatical variations** teach the model to understand paraphrases
-- **Logical combinations** teach the model to reason across multiple fields
-- Balance prevents overfitting to specific patterns
+#### Path 1: Single-Turn (50% of rows with `single_turn_ratio=0.5`)
 
----
-
-## Conversation Generation
-
-### Conversation Types
-
-#### Single-Turn Conversations
-
-Best for:
-- Simple classification tasks
-- Direct question-answer pairs
-- Rapid inference scenarios
-
-Structure:
 ```
-System: You are a pediatric gastroenterologist...
+System: You are a medical expert...
 
 User: [Clinical note]
 
-What is the malnutrition status and severity?
+[ONE combined question for ALL fields using style 1-16]
