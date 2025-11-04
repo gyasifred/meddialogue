@@ -30,8 +30,8 @@ Changelog (v1.0.0):
 - Improved context utilization reporting
 
 Example Usage:
-    >>> from meddialogue import MedDialogue, TaskConfig, DataMultiplicationConfig
-    >>> 
+    >>> from meddialogue import MedDialogue, TaskConfig, ConversationConfig
+    >>>
     >>> # Define task with field ordering
     >>> task_config = TaskConfig(
     ...     task_name="malnutrition_assessment",
@@ -42,18 +42,18 @@ Example Usage:
     ...         "care_plan": 3                     # Action third
     ...     }
     ... )
-    >>> 
-    >>> # Configure data preparation
-    >>> mult_config = DataMultiplicationConfig(
+    >>>
+    >>> # Configure conversation generation
+    >>> conversation_config = ConversationConfig(
     ...     single_turn_ratio=0.7,
     ...     validation_split=0.2,
     ...     logical_style_ratio=0.4
     ... )
-    >>> 
+    >>>
     >>> # Train model
-    >>> trainer = MedDialogue(task_config=task_config, mult_config=mult_config)
+    >>> trainer = MedDialogue(task_config=task_config, conversation_config=conversation_config)
     >>> results = trainer.train_from_csv("data.csv")
-    >>> 
+    >>>
     >>> # Inference
     >>> response = trainer.infer(clinical_note="Patient presents with...", format="json")
 """
@@ -64,7 +64,8 @@ from .config import (
     TrainingConfig,
     ModelConfig,
     LoRAConfig,
-    DataMultiplicationConfig,
+    ConversationConfig,
+    DataMultiplicationConfig,  # Backward compatibility alias
     OutputFormat,
     PIISensitivity
 )
@@ -103,38 +104,39 @@ __institution__ = "Medical University of South Carolina, Biomedical Informatics 
 __all__ = [
     # Main interface
     "MedDialogue",
-    
+
     # Configuration
     "TaskConfig",
     "SafetyConfig",
     "TrainingConfig",
     "ModelConfig",
     "LoRAConfig",
-    "DataMultiplicationConfig",
+    "ConversationConfig",
+    "DataMultiplicationConfig",  # Backward compatibility alias
     "OutputFormat",
     "PIISensitivity",
-    
+
     # Data preparation
     "DataPrep",
     "DataMultiplier",  # Backward compatibility
     "QuestionCombiner",
     "ResponseFormatter",
     "ConversationExample",
-    
+
     # Training
     "Trainer",
-    
+
     # Inference
     "InferencePipeline",
     "BatchInference",
-    
+
     # Models
     "ModelRegistry",
     "get_supported_models",
     "load_model",
     "apply_lora",
     "get_device",
-    
+
     # Safety
     "SafetyChecker",
     "PIIDetector",

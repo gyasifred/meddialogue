@@ -414,15 +414,25 @@ class ModelConfig:
 
 
 @dataclass
-class DataMultiplicationConfig:
+class ConversationConfig:
     """
-    Configuration for data preparation strategy (v1.1.0).
-    
+    Configuration for conversation generation strategy (v1.1.0).
+
+    Controls how training conversations are structured and generated, including:
+    - Single-turn vs multi-turn conversation distribution
+    - Question combination styles (grammatical vs logical reasoning)
+    - Context window management and response allocation
+    - Typo injection for robustness training
+    - Validation data splitting
+
+    This class does NOT multiply data (maintains 1:1 row-to-example mapping).
+    Instead, it configures HOW each conversation example is structured.
+
     Version 1.1.0 Changes:
     - Added logical_style_ratio for reasoning-oriented question combinations
     - Changed validation_split default to 0.0 (no validation by default)
     - Context window now specified in tokens (max_seq_length)
-    
+
     Attributes:
         single_turn_ratio: Ratio of single-turn conversations (default: 0.5)
         max_multi_turns: Maximum conversation turns in multi-turn examples (default: 10)
@@ -514,3 +524,7 @@ def save_config_to_json(config: Any, json_path: str):
                 else:
                     config_dict[key] = value
             json.dump(config_dict, f, indent=2)
+
+
+# Backward compatibility alias
+DataMultiplicationConfig = ConversationConfig
