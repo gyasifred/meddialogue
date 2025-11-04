@@ -17,7 +17,7 @@ from datetime import datetime
 
 from .config import (
     TaskConfig, SafetyConfig, TrainingConfig, 
-    ModelConfig, DataMultiplicationConfig, OutputFormat
+    ModelConfig, ConversationConfig, OutputFormat
 )
 from .data_prep import DataPrep
 from .safety import SafetyChecker
@@ -43,7 +43,7 @@ class MedDialogue:
     - Comprehensive logging and statistics
     
     Example:
-        >>> from meddialogue import MedDialogue, TaskConfig, DataMultiplicationConfig
+        >>> from meddialogue import MedDialogue, TaskConfig, ConversationConfig
         >>> 
         >>> # Define task with field ordering for reasoning
         >>> task_config = TaskConfig(
@@ -58,7 +58,7 @@ class MedDialogue:
         ... )
         >>> 
         >>> # Configure data preparation (v1.1.0)
-        >>> mult_config = DataMultiplicationConfig(
+        >>> conversation_config = ConversationConfig(
         ...     single_turn_ratio=0.7,          # 70% single-turn, 30% multi-turn
         ...     max_multi_turns=3,               # Up to 4 conversation turns
         ...     include_typos=True,
@@ -71,7 +71,7 @@ class MedDialogue:
         >>> # Initialize framework
         >>> trainer = MedDialogue(
         ...     task_config=task_config,
-        ...     mult_config=mult_config,
+        ...     conversation_config=conversation_config,
         ...     model_type="llama"
         ... )
         >>> 
@@ -91,7 +91,7 @@ class MedDialogue:
         model_type: str = "llama",
         safety_config: Optional[SafetyConfig] = None,
         training_config: Optional[TrainingConfig] = None,
-        mult_config: Optional[DataMultiplicationConfig] = None,
+        conversation_config: Optional[ConversationConfig] = None,
         output_dir: str = "./output",
         enable_safety: bool = True,
         cuda_device: int = 0,
@@ -105,7 +105,7 @@ class MedDialogue:
             model_type: Model type from ["llama", "phi-4", "mistral", "qwen"]
             safety_config: Safety configuration (optional, uses defaults if None)
             training_config: Training configuration (optional, uses defaults if None)
-            mult_config: Data multiplication configuration (optional, uses defaults if None)
+            conversation_config: Data multiplication configuration (optional, uses defaults if None)
             output_dir: Output directory for models and logs
             enable_safety: Enable safety checks (PII detection, bias monitoring)
             cuda_device: CUDA device index (default: 0)
@@ -115,7 +115,7 @@ class MedDialogue:
         self.model_type = model_type
         self.safety_config = safety_config or SafetyConfig()
         self.training_config = training_config or TrainingConfig()
-        self.mult_config = mult_config or DataMultiplicationConfig()
+        self.conversation_config = conversation_config or ConversationConfig()
         self.output_dir = output_dir
         self.enable_safety = enable_safety
         self.cuda_device = cuda_device
@@ -154,7 +154,7 @@ class MedDialogue:
         )
         
         # Initialize components
-        self.data_prep = DataPrep(task_config, mult_config)
+        self.data_prep = DataPrep(task_config, conversation_config)
         self.safety_checker = SafetyChecker(self.safety_config, task_config) if enable_safety else None
         self.trainer = None
         self.inference_pipeline = None
@@ -173,17 +173,17 @@ class MedDialogue:
         logger.info(f"Output directory: {output_dir}")
         logger.info("-" * 80)
         logger.info("Data Preparation Settings (v1.0.0):")
-        logger.info(f"  Single-turn ratio: {mult_config.single_turn_ratio * 100:.0f}%")
-        logger.info(f"  Multi-turn ratio: {(1 - mult_config.single_turn_ratio) * 100:.0f}%")
-        logger.info(f"  Max conversation turns: {mult_config.max_multi_turns + 1}")
-        logger.info(f"  Logical style ratio: {mult_config.logical_style_ratio * 100:.0f}%")
-        logger.info(f"  Context window: {mult_config.context_window_size} chars (~{mult_config.context_window_size // 4000}K tokens)")
-        logger.info(f"  Question length: {mult_config.min_question_length}-{mult_config.max_question_length} chars")
-        logger.info(f"  Typos enabled: {mult_config.include_typos} ({mult_config.typo_ratio * 100:.0f}% if enabled)")
+        logger.info(f"  Single-turn ratio: {conversation_config.single_turn_ratio * 100:.0f}%")
+        logger.info(f"  Multi-turn ratio: {(1 - conversation_config.single_turn_ratio) * 100:.0f}%")
+        logger.info(f"  Max conversation turns: {conversation_config.max_multi_turns + 1}")
+        logger.info(f"  Logical style ratio: {conversation_config.logical_style_ratio * 100:.0f}%")
+        logger.info(f"  Context window: {conversation_config.context_window_size} chars (~{conversation_config.context_window_size // 4000}K tokens)")
+        logger.info(f"  Question length: {conversation_config.min_question_length}-{conversation_config.max_question_length} chars")
+        logger.info(f"  Typos enabled: {conversation_config.include_typos} ({conversation_config.typo_ratio * 100:.0f}% if enabled)")
         
         # Validation split messaging
-        if mult_config.validation_split > 0:
-            logger.info(f"  Validation split: {mult_config.validation_split * 100:.0f}% (validation enabled)")
+        if conversation_config.validation_split > 0:
+            logger.info(f"  Validation split: {conversation_config.validation_split * 100:.0f}% (validation enabled)")
         else:
             logger.info(f"  Validation split: DISABLED (all data used for training)")
         
@@ -231,8 +231,8 @@ class MedDialogue:
         logger.info(f"Input data: {len(data)} rows")
         logger.info(f"Expected output: ~{len(data)} examples (1:1 mapping)")
         
-        if self.mult_config.validation_split > 0:
-            expected_train = int(len(data) * (1 - self.mult_config.validation_split))
+        if self.conversation_config.validation_split > 0:
+            expected_train = int(len(data) * (1 - self.conversation_config.validation_split))
             expected_val = len(data) - expected_train
             logger.info(f"Expected split: ~{expected_train} train, ~{expected_val} validation")
         else:
@@ -659,14 +659,14 @@ class MedDialogue:
             "model": self.model_config.to_dict(),
             "training": self.training_config.__dict__,
             "data_preparation": {
-                "single_turn_ratio": self.mult_config.single_turn_ratio,
-                "max_multi_turns": self.mult_config.max_multi_turns,
-                "logical_style_ratio": self.mult_config.logical_style_ratio,
-                "context_window": self.mult_config.context_window_size,
-                "include_typos": self.mult_config.include_typos,
-                "typo_ratio": self.mult_config.typo_ratio,
-                "validation_split": self.mult_config.validation_split,
-                "has_validation": self.mult_config.validation_split > 0
+                "single_turn_ratio": self.conversation_config.single_turn_ratio,
+                "max_multi_turns": self.conversation_config.max_multi_turns,
+                "logical_style_ratio": self.conversation_config.logical_style_ratio,
+                "context_window": self.conversation_config.context_window_size,
+                "include_typos": self.conversation_config.include_typos,
+                "typo_ratio": self.conversation_config.typo_ratio,
+                "validation_split": self.conversation_config.validation_split,
+                "has_validation": self.conversation_config.validation_split > 0
             },
             "safety": {
                 "enabled": self.enable_safety,

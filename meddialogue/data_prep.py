@@ -31,7 +31,7 @@ from dataclasses import dataclass
 import pandas as pd
 from datasets import Dataset
 
-from .config import TaskConfig, OutputFormat, DataMultiplicationConfig
+from .config import TaskConfig, OutputFormat, ConversationConfig
 from .utils import preprocess_clinical_text, add_typo, weighted_random_choice
 
 logger = logging.getLogger(__name__)
@@ -148,9 +148,9 @@ class QuestionCombiner:
     16. Dependency: "Q1, upon which depends Q2, which determines Q3"
     """
     
-    def __init__(self, task_config: TaskConfig, mult_config: DataMultiplicationConfig):
+    def __init__(self, task_config: TaskConfig, conversation_config: ConversationConfig):
         self.task_config = task_config
-        self.mult_config = mult_config
+        self.conversation_config = conversation_config
         self.question_templates = task_config.question_templates
         self.output_fields = task_config.output_fields
         self.field_ordering = task_config.field_ordering
@@ -194,7 +194,7 @@ class QuestionCombiner:
         logger.info(f"  Total question variants: {sum(len(v) for v in self.questions_by_field.values())}")
         logger.info(f"  Grammatical styles: {len(self.grammatical_styles)}")
         logger.info(f"  Logical styles: {len(self.logical_styles)}")
-        logger.info(f"  Logical style ratio: {mult_config.logical_style_ratio * 100:.0f}%")
+        logger.info(f"  Logical style ratio: {conversation_config.logical_style_ratio * 100:.0f}%")
     
     def combine_questions(
         self, 
@@ -228,7 +228,7 @@ class QuestionCombiner:
         
         # Decide: grammatical or logical style?
         use_logical = (
-            random.random() < self.mult_config.logical_style_ratio and 
+            random.random() < self.conversation_config.logical_style_ratio and 
             len(fields) >= 2  # Logical styles need at least 2 questions
         )
         
@@ -261,7 +261,7 @@ class QuestionCombiner:
             combined = " ".join(questions[:max(1, len(questions)//2)])
         
         # Add typo if requested
-        if include_typo and self.mult_config.include_typos:
+        if include_typo and self.conversation_config.include_typos:
             combined = add_typo(combined)
         
         # Add format instruction if needed
@@ -602,22 +602,22 @@ class DataPrep:
     MIN_QUESTION_LENGTH = 1000
     MAX_QUESTION_LENGTH = 8000
     
-    def __init__(self, task_config: TaskConfig, mult_config: DataMultiplicationConfig):
+    def __init__(self, task_config: TaskConfig, conversation_config: ConversationConfig):
         self.task_config = task_config
-        self.mult_config = mult_config
-        self.question_combiner = QuestionCombiner(task_config, mult_config)
+        self.conversation_config = conversation_config
+        self.question_combiner = QuestionCombiner(task_config, conversation_config)
         self.response_formatter = ResponseFormatter(task_config)
         
         logger.info("DataPrep v1.1.0 initialized")
         logger.info(f"  Context window: {self.CONTEXT_WINDOW} chars")
         logger.info(f"  Question length: {self.MIN_QUESTION_LENGTH}-{self.MAX_QUESTION_LENGTH} chars")
-        logger.info(f"  Single-turn ratio: {mult_config.single_turn_ratio * 100:.0f}%")
-        logger.info(f"  Multi-turn ratio: {(1 - mult_config.single_turn_ratio) * 100:.0f}%")
+        logger.info(f"  Single-turn ratio: {conversation_config.single_turn_ratio * 100:.0f}%")
+        logger.info(f"  Multi-turn ratio: {(1 - conversation_config.single_turn_ratio) * 100:.0f}%")
         logger.info(f"  Output fields: {len(task_config.output_fields)}")
-        logger.info(f"  Max turns per conversation: {mult_config.max_multi_turns + 1}")
-        logger.info(f"  Typo ratio: {mult_config.typo_ratio * 100:.1f}%")
-        logger.info(f"  Logical style ratio: {mult_config.logical_style_ratio * 100:.0f}%")
-        logger.info(f"  Validation split: {mult_config.validation_split * 100:.1f}%")
+        logger.info(f"  Max turns per conversation: {conversation_config.max_multi_turns + 1}")
+        logger.info(f"  Typo ratio: {conversation_config.typo_ratio * 100:.1f}%")
+        logger.info(f"  Logical style ratio: {conversation_config.logical_style_ratio * 100:.0f}%")
+        logger.info(f"  Validation split: {conversation_config.validation_split * 100:.1f}%")
         logger.info(f"  Seed: 42")
     
     def prepare_data(
@@ -637,8 +637,8 @@ class DataPrep:
         logger.info(f"Preparing {len(data)} examples with semantic variation (v1.1.0)")
         
         # Split data if validation requested
-        if self.mult_config.validation_split > 0:
-            train_data = data.sample(frac=1-self.mult_config.validation_split, random_state=42)
+        if self.conversation_config.validation_split > 0:
+            train_data = data.sample(frac=1-self.conversation_config.validation_split, random_state=42)
             val_data = data.drop(train_data.index)
             logger.info(f"Split: {len(train_data)} train, {len(val_data)} validation")
         else:
@@ -649,7 +649,7 @@ class DataPrep:
         # Generate training examples
         train_examples = []
         for idx, row in train_data.iterrows():
-            if random.random() < self.mult_config.single_turn_ratio:
+            if random.random() < self.conversation_config.single_turn_ratio:
                 example = self._create_single_turn_example(row)
             else:
                 example = self._create_multi_turn_example(row)
@@ -659,7 +659,7 @@ class DataPrep:
         val_examples = []
         if not val_data.empty:
             for idx, row in val_data.iterrows():
-                if random.random() < self.mult_config.single_turn_ratio:
+                if random.random() < self.conversation_config.single_turn_ratio:
                     example = self._create_single_turn_example(row)
                 else:
                     example = self._create_multi_turn_example(row)
@@ -716,8 +716,8 @@ class DataPrep:
         output_format = select_output_format(self.task_config)
         
         include_typo = (
-            self.mult_config.include_typos and 
-            random.random() < self.mult_config.typo_ratio
+            self.conversation_config.include_typos and 
+            random.random() < self.conversation_config.typo_ratio
         )
         
         question, field_to_question = self.question_combiner.combine_questions(
@@ -794,7 +794,7 @@ class DataPrep:
         remaining_fields = available_fields[num_first:]
         
         # Turn 2: Follow-up (if fields remain)
-        if len(remaining_fields) >= 2 and self.mult_config.include_followup_questions:
+        if len(remaining_fields) >= 2 and self.conversation_config.include_followup_questions:
             num_second = min(2, len(remaining_fields))
             second_fields = remaining_fields[:num_second]
             
@@ -822,9 +822,9 @@ class DataPrep:
             remaining_fields = remaining_fields[num_second:]
         
         # Additional turns (if fields remain)
-        if remaining_fields and self.mult_config.include_followup_questions:
+        if remaining_fields and self.conversation_config.include_followup_questions:
             max_additional_turns = min(
-                self.mult_config.max_multi_turns - 1,
+                self.conversation_config.max_multi_turns - 1,
                 len(remaining_fields)
             )
             
@@ -837,8 +837,8 @@ class DataPrep:
                     turn_format = get_weighted_format_from_subset(self.task_config, text_md_formats) if text_md_formats else OutputFormat.TEXT
                     
                     include_typo = (
-                        self.mult_config.include_typos and 
-                        random.random() < self.mult_config.typo_ratio
+                        self.conversation_config.include_typos and 
+                        random.random() < self.conversation_config.typo_ratio
                     )
                     
                     followup_q, followup_field_to_q = self.question_combiner.combine_questions(

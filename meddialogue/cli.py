@@ -15,7 +15,7 @@ import sys
 from pathlib import Path
 
 from .core import MedDialogue
-from .config import TaskConfig, SafetyConfig, TrainingConfig, DataMultiplicationConfig, OutputFormat
+from .config import TaskConfig, SafetyConfig, TrainingConfig, ConversationConfig, OutputFormat
 
 logging.basicConfig(
     level=logging.INFO,
@@ -140,7 +140,7 @@ Note: v1.0.0 uses 1:1 row-to-example mapping (no artificial multiplication)
         use_full_dataset=not args.quick_test
     )
     
-    mult_config = DataMultiplicationConfig(
+    conversation_config = ConversationConfig(
         single_turn_ratio=args.single_turn_ratio,
         validation_split=args.validation_split,
         logical_style_ratio=args.logical_style_ratio,
@@ -154,7 +154,7 @@ Note: v1.0.0 uses 1:1 row-to-example mapping (no artificial multiplication)
         model_type=args.model,
         safety_config=safety_config,
         training_config=training_config,
-        mult_config=mult_config,
+        conversation_config=conversation_config,
         output_dir=args.output,
         enable_safety=not args.disable_safety,
         cuda_device=args.cuda_device
