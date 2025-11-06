@@ -197,52 +197,65 @@ class QuestionCombiner:
         logger.info(f"  Logical style ratio: {conversation_config.logical_style_ratio * 100:.0f}%")
     
     def combine_questions(
-        self, 
-        fields: List[str], 
+        self,
+        fields: List[str],
         output_format: Optional[OutputFormat] = None,
         include_typo: bool = False,
         max_length: int = 8000
-    ) -> Tuple[str, Dict[str, str]]:
+    ) -> Tuple[str, List[Tuple[str, str]]]:
         """
-        Combine questions and return both combined text and field-to-question mapping.
-        
+        Combine questions and return both combined text and ordered field-question pairs.
+
         Returns:
-            Tuple of (combined_question_text, field_to_question_dict)
-            where field_to_question_dict maps field names to the actual questions selected
+            Tuple of (combined_question_text, ordered_field_question_pairs)
+            where ordered_field_question_pairs is a list of (field, question) tuples
+            in the SAME ORDER as they appear in the combined question text
         """
         if len(fields) == 0:
             raise ValueError("Must specify at least one field")
-        
+
         # Select questions for each field
         questions = []
         field_to_question = {}
-        
+
         for field in fields:
             if field in self.questions_by_field:
                 q = random.choice(self.questions_by_field[field])
                 questions.append(q)
                 field_to_question[field] = q
-        
+
         if len(questions) == 0:
             raise ValueError(f"No questions for fields: {fields}")
-        
+
         # Decide: grammatical or logical style?
         use_logical = (
-            random.random() < self.conversation_config.logical_style_ratio and 
+            random.random() < self.conversation_config.logical_style_ratio and
             len(fields) >= 2  # Logical styles need at least 2 questions
         )
-        
+
+        # Track the actual order of questions as they will appear in combined text
+        ordered_field_question_pairs = []
+
         if use_logical:
             # Order questions by field priority for logical styles
             ordered_fields = self._order_fields_by_priority(fields)
             ordered_questions = [field_to_question[f] for f in ordered_fields]
             style_func = random.choice(self.logical_styles)
             combined = style_func(ordered_questions)
+            # Preserve the ordered field-question pairs
+            ordered_field_question_pairs = [(f, field_to_question[f]) for f in ordered_fields]
         else:
             # Random order for grammatical styles
-            random.shuffle(questions)
+            # Create field-question pairs BEFORE shuffling
+            field_question_pairs = [(field, field_to_question[field]) for field in fields]
+            # Shuffle the pairs together to maintain association
+            random.shuffle(field_question_pairs)
+            # Extract shuffled questions for style function
+            shuffled_questions = [q for _, q in field_question_pairs]
             style_func = random.choice(self.grammatical_styles)
-            combined = style_func(questions)
+            combined = style_func(shuffled_questions)
+            # Store the shuffled order
+            ordered_field_question_pairs = field_question_pairs
         
         # Check length and retry if needed
         attempts = 0
@@ -252,18 +265,24 @@ class QuestionCombiner:
                 style_func = random.choice(self.logical_styles)
                 combined = style_func(ordered_questions)
             else:
+                # Re-shuffle and try again
+                random.shuffle(field_question_pairs)
+                shuffled_questions = [q for _, q in field_question_pairs]
                 style_func = random.choice(self.grammatical_styles)
-                combined = style_func(questions)
+                combined = style_func(shuffled_questions)
+                ordered_field_question_pairs = field_question_pairs
             attempts += 1
-        
+
         if len(combined) > max_length:
-            # Fallback: simple concatenation
-            combined = " ".join(questions[:max(1, len(questions)//2)])
-        
+            # Fallback: simple concatenation with half the questions
+            half_count = max(1, len(ordered_field_question_pairs)//2)
+            ordered_field_question_pairs = ordered_field_question_pairs[:half_count]
+            combined = " ".join([q for _, q in ordered_field_question_pairs])
+
         # Add typo if requested
         if include_typo and self.conversation_config.include_typos:
             combined = add_typo(combined)
-        
+
         # Add format instruction if needed
         if output_format and output_format != OutputFormat.TEXT:
             format_q = self._create_format_question(output_format)
@@ -273,8 +292,8 @@ class QuestionCombiner:
                 available = max_length - len(format_q) - 10
                 if available > 50:
                     combined = combined[:available].rsplit(' ', 1)[0] + "... " + format_q
-        
-        return combined, field_to_question
+
+        return combined, ordered_field_question_pairs
     
     def _order_fields_by_priority(self, fields: List[str]) -> List[str]:
         """
@@ -515,71 +534,76 @@ class QuestionCombiner:
 
 class ResponseFormatter:
     """
-    Formats responses using actual question text as keys.
+    Formats responses using actual question text as keys, preserving question order.
     """
-    
+
     def __init__(self, task_config: TaskConfig):
         self.task_config = task_config
-    
+
     def format_response(
         self,
         data: Dict[str, Any],
-        field_to_question: Dict[str, str],
+        ordered_field_question_pairs: List[Tuple[str, str]],
         output_format: OutputFormat = OutputFormat.TEXT
     ) -> str:
         """
-        Format response using question text as keys.
-        
+        Format response using question text as keys in the order questions were asked.
+
         Args:
             data: Dictionary mapping field names to answer content
-            field_to_question: Dictionary mapping field names to actual questions asked
+            ordered_field_question_pairs: List of (field, question) tuples in question order
             output_format: Desired output format
-        
+
         Returns:
-            Formatted response string
+            Formatted response string with answers in the same order as questions
         """
-        response_data = {}
-        for field, question in field_to_question.items():
-            response_data[question] = data.get(field, "")
-        
+        # Build ordered response data preserving question order
+        response_data = []
+        for field, question in ordered_field_question_pairs:
+            answer = data.get(field, "")
+            response_data.append((question, answer))
+
         if output_format == OutputFormat.JSON:
             return self._format_json(response_data)
         elif output_format == OutputFormat.XML:
-            return self._format_xml(response_data, field_to_question)
+            return self._format_xml(response_data, ordered_field_question_pairs)
         elif output_format == OutputFormat.MARKDOWN:
             return self._format_markdown(response_data)
         else:
             return self._format_text(response_data)
     
-    def _format_text(self, data: Dict[str, Any]) -> str:
+    def _format_text(self, data: List[Tuple[str, Any]]) -> str:
         if len(data) == 1:
-            return str(list(data.values())[0])
+            return str(data[0][1])
         parts = []
-        for question, answer in data.items():
+        for question, answer in data:
             if answer:
                 parts.append(f"{question}\n{answer}")
         return "\n\n".join(parts)
-    
-    def _format_json(self, data: Dict[str, Any]) -> str:
-        return json.dumps(data, indent=2, ensure_ascii=False)
-    
-    def _format_xml(self, data: Dict[str, Any], field_to_question: Dict[str, str]) -> str:
+
+    def _format_json(self, data: List[Tuple[str, Any]]) -> str:
+        # Convert to ordered dict to preserve order in JSON
+        ordered_dict = {question: answer for question, answer in data}
+        return json.dumps(ordered_dict, indent=2, ensure_ascii=False)
+
+    def _format_xml(self, data: List[Tuple[str, Any]], field_question_pairs: List[Tuple[str, str]]) -> str:
         lines = ['<?xml version="1.0" encoding="UTF-8"?>', '<assessment>']
-        
-        field_names = {q: f for f, q in field_to_question.items()}
-        
-        for question, answer in data.items():
-            field_name = field_names.get(question, 'field')
+
+        # Create mapping from question to field name
+        question_to_field = {q: f for f, q in field_question_pairs}
+
+        for question, answer in data:
+            field_name = question_to_field.get(question, 'field')
             safe_value = str(answer).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
             lines.append(f'  <{field_name} question="{question}">')
             lines.append(f'    {safe_value}')
             lines.append(f'  </{field_name}>')
         lines.append('</assessment>')
         return '\n'.join(lines)
-    
-    def _format_markdown(self, data: Dict[str, Any]) -> str:
+
+    def _format_markdown(self, data: List[Tuple[str, Any]]) -> str:
         lines = ["# Assessment\n"]
-        for question, answer in data.items():
+        for question, answer in data:
             lines.append(f"## {question}\n")
             lines.append(f"{answer}\n")
         return "\n".join(lines)
@@ -720,24 +744,24 @@ class DataPrep:
             random.random() < self.conversation_config.typo_ratio
         )
         
-        question, field_to_question = self.question_combiner.combine_questions(
+        question, ordered_pairs = self.question_combiner.combine_questions(
             requested_fields,
             output_format,
             include_typo,
             max_length=max_q_len
         )
-        
+
         response = self.response_formatter.format_response(
             output_data,
-            field_to_question,
+            ordered_pairs,
             output_format
         )
-        
+
         conversation = [
             {"role": "user", "content": f"{question}\n\nCLINICAL NOTE:\n{clinical_note}"},
             {"role": "assistant", "content": response}
         ]
-        
+
         return ConversationExample(
             conversation=conversation,
             metadata={
@@ -745,7 +769,7 @@ class DataPrep:
                 "num_fields_asked": num_to_ask,
                 "total_fields": num_fields,
                 "fields": requested_fields,
-                "questions_used": list(field_to_question.values()),
+                "questions_used": [q for _, q in ordered_pairs],
                 "format": output_format.value,
                 "has_typo": include_typo,
                 "note_length": note_length,
@@ -773,16 +797,16 @@ class DataPrep:
         # Turn 1: First questions
         num_first = min(2, len(available_fields))
         first_fields = available_fields[:num_first]
-        
-        first_q, first_field_to_q = self.question_combiner.combine_questions(
-            first_fields, 
-            OutputFormat.TEXT, 
+
+        first_q, first_ordered_pairs = self.question_combiner.combine_questions(
+            first_fields,
+            OutputFormat.TEXT,
             include_typo=False,
             max_length=max_q_len
         )
         first_r = self.response_formatter.format_response(
-            output_data, 
-            first_field_to_q, 
+            output_data,
+            first_ordered_pairs,
             OutputFormat.TEXT
         )
         
@@ -798,11 +822,11 @@ class DataPrep:
             num_second = min(2, len(remaining_fields))
             second_fields = remaining_fields[:num_second]
             
-            json_xml_formats = [f for f in self.task_config.output_formats 
+            json_xml_formats = [f for f in self.task_config.output_formats
                               if f in [OutputFormat.JSON, OutputFormat.XML]]
             second_format = get_weighted_format_from_subset(self.task_config, json_xml_formats) if json_xml_formats else OutputFormat.TEXT
-            
-            second_q, second_field_to_q = self.question_combiner.combine_questions(
+
+            second_q, second_ordered_pairs = self.question_combiner.combine_questions(
                 second_fields,
                 second_format,
                 include_typo=False,
@@ -810,7 +834,7 @@ class DataPrep:
             )
             second_r = self.response_formatter.format_response(
                 output_data,
-                second_field_to_q,
+                second_ordered_pairs,
                 second_format
             )
             
@@ -837,11 +861,11 @@ class DataPrep:
                     turn_format = get_weighted_format_from_subset(self.task_config, text_md_formats) if text_md_formats else OutputFormat.TEXT
                     
                     include_typo = (
-                        self.conversation_config.include_typos and 
+                        self.conversation_config.include_typos and
                         random.random() < self.conversation_config.typo_ratio
                     )
-                    
-                    followup_q, followup_field_to_q = self.question_combiner.combine_questions(
+
+                    followup_q, followup_ordered_pairs = self.question_combiner.combine_questions(
                         [field],
                         turn_format,
                         include_typo,
@@ -849,7 +873,7 @@ class DataPrep:
                     )
                     followup_r = self.response_formatter.format_response(
                         output_data,
-                        followup_field_to_q,
+                        followup_ordered_pairs,
                         turn_format
                     )
                     
