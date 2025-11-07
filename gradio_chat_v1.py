@@ -4,9 +4,16 @@ Pediatric Malnutrition Assessment - Gradio Chat Interface
 
 Author: Frederick Gyasi (gyasi@musc.edu)
 Affiliation: Medical University of South Carolina, Biomedical Informatics Center, Clinical NLP Lab
-Version: 1.1.0
+Version: 1.2.0
 License: MIT
 Date: November 2025
+
+CHANGELOG v1.2.0 (2025-11-07):
+------------------------------
+- UX: Added STOP button to cancel generation mid-process ⏹️
+- UX: Text input remains usable while processing (type next question while waiting)
+- UX: Concurrent operations enabled - no blocking
+- PERF: Queue-based processing for better responsiveness
 
 CHANGELOG v1.1.0 (2025-11-07):
 ------------------------------
@@ -936,17 +943,20 @@ def create_professional_interface(engine: ClinicalConversationEngine) -> gr.Bloc
                                 placeholder="Ask anything - works without clinical notes!",
                                 lines=2,
                                 scale=5,
-                                show_label=False
+                                show_label=False,
+                                interactive=True  # Always keep interactive
                             )
-                            
-                            with gr.Column(scale=1, min_width=100):
-                                send_btn = gr.Button("📤 Send", variant="primary")
-                        
+
+                            with gr.Column(scale=1, min_width=120):
+                                with gr.Row():
+                                    send_btn = gr.Button("📤 Send", variant="primary", size="sm")
+                                    stop_btn = gr.Button("⏹️ Stop", variant="stop", size="sm")
+
                         with gr.Row():
                             new_conversation_btn = gr.Button("🆕 New", size="sm")
                             reset_btn = gr.Button("🔄 Reset", size="sm")
                             save_btn = gr.Button("💾 Save", size="sm")
-                        
+
                         status_message = gr.Markdown("")
                         
                         with gr.Row():
@@ -1043,21 +1053,25 @@ def create_professional_interface(engine: ClinicalConversationEngine) -> gr.Bloc
                 refresh_info_btn = gr.Button("🔄 Refresh")
                 
                 gr.Markdown("""
-                ## 📖 Version 1.0.0
-                
+                ## 📖 Version 1.2.0
+
                 **Key Features:**
                 - ✅ Clinical text NEVER passed when empty
                 - ✅ LLM works in pure chat mode without clinical context
                 - ✅ Clinical note only sent when explicitly loaded
                 - ✅ Clear notes functionality - clears note and resets chat
                 - ✅ New conversation properly clears previous clinical notes
-                - ✅ Compact, professional UI with proper sizing
-                
+                - ⏹️ **NEW**: Stop button to cancel generation mid-process
+                - ⌨️ **NEW**: Type next question while current one is processing
+                - ⚡ **NEW**: Non-blocking interface - no waiting for responses
+
                 **Usage:**
                 1. **Pure Chat**: Start chatting immediately without any clinical note
                 2. **With Clinical Note**: Load a note - it will be sent only with your first message
                 3. **Clear Note**: Use "Clear Note" to remove note or "Clear Note & Reset Chat" to start fresh
                 4. **New Conversation**: Clinical notes are NOT carried over to new conversations
+                5. **Stop Generation**: Click ⏹️ Stop button to cancel long-running generation
+                6. **Queue Questions**: Type next question while waiting for response
                 """)
         
         gr.HTML("""
@@ -1340,21 +1354,35 @@ def create_professional_interface(engine: ClinicalConversationEngine) -> gr.Bloc
             inputs=[doc_panel_visible],
             outputs=[doc_panel_visible, clinical_doc_column, toggle_doc_btn]
         )
-        
-        send_btn.click(
-            fn=process_user_message,
-            inputs=[user_input, clinical_note, chatbot, session_state],
-            outputs=[chatbot, user_input, session_state, status_message, 
-                    session_info_display, message_count_display, avg_time_display,
-                    clinical_note_status]
-        )
-        
-        user_input.submit(
+
+        # CRITICAL: Make send events cancellable and non-blocking
+        # This allows:
+        # 1. Stop button to cancel generation
+        # 2. User to type next question while current one is processing
+        send_event = send_btn.click(
             fn=process_user_message,
             inputs=[user_input, clinical_note, chatbot, session_state],
             outputs=[chatbot, user_input, session_state, status_message,
                     session_info_display, message_count_display, avg_time_display,
-                    clinical_note_status]
+                    clinical_note_status],
+            concurrency_limit=None  # Allow concurrent operations
+        )
+
+        submit_event = user_input.submit(
+            fn=process_user_message,
+            inputs=[user_input, clinical_note, chatbot, session_state],
+            outputs=[chatbot, user_input, session_state, status_message,
+                    session_info_display, message_count_display, avg_time_display,
+                    clinical_note_status],
+            concurrency_limit=None  # Allow concurrent operations
+        )
+
+        # Stop button cancels both send and submit events
+        stop_btn.click(
+            fn=None,
+            inputs=None,
+            outputs=None,
+            cancels=[send_event, submit_event]
         )
         
         new_conversation_btn.click(
@@ -1531,7 +1559,13 @@ Examples:
         logger.info("Building interface...")
         interface = create_professional_interface(engine)
         logger.info("✓ Interface ready")
-        
+
+        # CRITICAL: Enable queue for stop button and concurrent operations
+        interface.queue(
+            default_concurrency_limit=None  # Allow unlimited concurrent operations
+        )
+        logger.info("✓ Queue enabled - Stop button and concurrent typing active")
+
         print("\n" + "="*80)
         print("  🚀 LAUNCHING")
         print("="*80)
@@ -1539,10 +1573,11 @@ Examples:
         if args.share:
             print(f"🌍 Public link will be generated")
         print(f"\n🛑 Ctrl+C to stop")
+        print(f"\n✨ Features: Stop button + Type while processing")
         print("="*80 + "\n")
-        
+
         auth_tuple = tuple(args.auth) if args.auth else None
-        
+
         interface.launch(
             server_name="0.0.0.0",
             server_port=args.port,
