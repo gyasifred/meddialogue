@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
 """
-Malnutrition Model Evaluation Script - v1.6.0 (Optimized for Speed + Clean State)
+Malnutrition Model Evaluation Script - v1.7.0 (Optimized - 2 Key Aspects Only)
 ==================================================================================
 Evaluates trained MedDialogue malnutrition models on test datasets.
 
 CRITICAL FIXES:
+  - v1.7.0: Reduced Step 1 to 2 key aspects (growth/anthropometrics + clinical signs) for speed
   - v1.6.0: Shortened questions for faster inference; verified clean state between samples
   - v1.5.0: Fixed JSON extraction bug (was extracting wrong status from question examples)
   - v1.4.0: Now uses TRUE multi-turn conversations matching training format
 
-Uses 2-step multi-turn clinical reasoning (OPTIMIZED CONCISE QUESTIONS):
-  1. Clinical Assessment: "Assess for malnutrition. Identify key evidence and apply diagnostic criteria."
-  2. Final Classification: "Provide classification as JSON: {...}"
+Uses 2-step multi-turn clinical reasoning (OPTIMIZED - Only 2 key aspects per step):
+  1. Clinical Assessment: Focus on growth/anthropometrics + clinical signs only
+  2. Final Classification: JSON output based on Step 1
 
 Training/Inference Match:
   - Turn 1: Question + Clinical Note → Assessment
@@ -33,7 +34,7 @@ Required CSV columns:
 
 Author: Frederick Gyasi (gyasi@musc.edu)
 Institution: Medical University of South Carolina, Biomedical Informatics Center
-Version: 1.6.0
+Version: 1.7.0
 """
 import os
 import sys
@@ -227,9 +228,10 @@ class MalnutritionEvaluator:
         print("2-STEP MULTI-TURN REASONING PROCESS (Training-Matched)")
         print("="*80)
 
-        # Define questions for both turns (SHORTENED FOR SPEED)
+        # Define questions for both turns (SHORTENED FOR SPEED - Only 2 key aspects)
         assessment_question = (
-            "Assess for malnutrition. Identify key evidence and apply diagnostic criteria."
+            "Assess for malnutrition. Focus on: (1) Growth/anthropometric data, (2) Clinical signs. "
+            "Then state if diagnostic criteria are met."
         )
 
         classification_question = (
