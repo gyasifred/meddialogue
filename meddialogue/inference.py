@@ -223,18 +223,121 @@ class InferencePipeline:
         # Valid if has headers and at least half the expected fields
         return has_headers and found_fields >= len(self.task_config.output_fields) // 2
     
+    def infer_multi_turn(
+        self,
+        clinical_note: str,
+        questions: List[str],
+        output_formats: Optional[List[OutputFormat]] = None,
+        return_full_response: bool = False
+    ) -> List[Union[str, Dict[str, Any]]]:
+        """
+        Run multi-turn inference on single clinical note.
+
+        Matches training format where:
+        - Turn 1: Includes clinical note
+        - Turn 2+: Uses conversation context (no repeated note)
+
+        Args:
+            clinical_note: Clinical text
+            questions: List of questions for each turn
+            output_formats: Optional list of output formats (one per question)
+            return_full_response: Whether to return full response dict
+
+        Returns:
+            List of responses (one per turn)
+        """
+        clinical_note = preprocess_clinical_text(clinical_note)
+
+        if output_formats is None:
+            output_formats = [OutputFormat.TEXT] * len(questions)
+
+        if len(output_formats) != len(questions):
+            raise ValueError(f"Number of output_formats ({len(output_formats)}) must match number of questions ({len(questions)})")
+
+        # Build cumulative conversation
+        conversation = [
+            {"role": "system", "content": self.task_config.get_system_prompt()}
+        ]
+
+        responses = []
+
+        for turn_idx, (question, output_format) in enumerate(zip(questions, output_formats)):
+            # Ensure format instruction
+            question = self._ensure_format_instruction(question, output_format)
+
+            # Turn 1: Include clinical note (matches training)
+            if turn_idx == 0:
+                user_content = f"{question}\n\nCLINICAL NOTE:\n{clinical_note}"
+            else:
+                # Turn 2+: Only question (matches training)
+                user_content = question
+
+            # Add user message to conversation
+            conversation.append({"role": "user", "content": user_content})
+
+            # Apply chat template to current conversation
+            prompt = self.tokenizer.apply_chat_template(
+                conversation,
+                tokenize=False,
+                add_generation_prompt=True
+            )
+
+            # Generate response
+            inputs = self.tokenizer(prompt, return_tensors="pt", truncation=True).to(self.device)
+
+            with torch.no_grad():
+                outputs = self.model.generate(
+                    **inputs,
+                    max_new_tokens=self.max_new_tokens,
+                    temperature=self.temperature,
+                    do_sample=True,
+                    pad_token_id=self.tokenizer.pad_token_id,
+                    eos_token_id=self.tokenizer.eos_token_id,
+                    use_cache=True
+                )
+
+            # Cleanup
+            del inputs
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
+            full_output = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
+            response = self._extract_assistant_response(full_output, prompt)
+
+            # Parse and validate format
+            parsed_response = self._parse_and_validate_format(response, output_format)
+
+            # Add assistant response to conversation for next turn
+            conversation.append({"role": "assistant", "content": response})
+
+            if return_full_response:
+                responses.append({
+                    "response": parsed_response,
+                    "format": output_format.value,
+                    "question": question,
+                    "raw_response": response,
+                    "turn": turn_idx + 1,
+                    "metadata": {
+                        "output_length": len(str(parsed_response))
+                    }
+                })
+            else:
+                responses.append(parsed_response)
+
+        return responses
+
     def batch_infer(
         self,
         clinical_notes: List[str],
         questions: Optional[List[str]] = None,
         output_format: OutputFormat = OutputFormat.TEXT
     ) -> List[Union[str, Dict[str, Any]]]:
-        """Run inference on batch of clinical notes."""
+        """Run inference on batch of clinical notes (single-turn)."""
         logger.info(f"Running batch inference on {len(clinical_notes)} examples")
-        
+
         if questions is None:
             questions = [None] * len(clinical_notes)
-        
+
         results = []
         for i, (note, question) in enumerate(zip(clinical_notes, questions)):
             try:
@@ -243,10 +346,10 @@ class InferencePipeline:
             except Exception as e:
                 logger.error(f"Inference failed for note {i}: {e}")
                 results.append(None)
-        
+
         success_count = sum(1 for r in results if r is not None)
         logger.info(f"Batch inference completed: {success_count}/{len(results)} successful")
-        
+
         return results
     
     def _extract_assistant_response(self, full_output: str, prompt: str) -> str:
