@@ -51,32 +51,40 @@ class InferencePipeline:
         output_format: OutputFormat = OutputFormat.TEXT,
         return_full_response: bool = False
     ) -> Union[str, Dict[str, Any]]:
-        """Run inference on single clinical note."""
+        """
+        Run inference on single clinical note.
+
+        Each call is independent - no history carried over between calls.
+        """
         clinical_note = preprocess_clinical_text(clinical_note)
-        
+
         # FIX: Improved format instruction generation
         if question is None:
             question = self._generate_default_question(output_format)
         else:
             # FIX: Ensure format instruction is in question if not already present
             question = self._ensure_format_instruction(question, output_format)
-        
-        # Build conversation
+
+        # Build conversation (fresh for each call - no history)
         conversation = [
             {"role": "system", "content": self.task_config.get_system_prompt()},
             {"role": "user", "content": f"{question}\n\nCLINICAL NOTE:\n{clinical_note}"}
         ]
-        
+
         # Apply chat template
         prompt = self.tokenizer.apply_chat_template(
             conversation,
             tokenize=False,
             add_generation_prompt=True
         )
-        
+
         # Generate response
         inputs = self.tokenizer(prompt, return_tensors="pt", truncation=True).to(self.device)
-        
+
+        # Clear any cached states before generation to ensure independence
+        if hasattr(self.model, 'reset_cache'):
+            self.model.reset_cache()
+
         with torch.no_grad():
             outputs = self.model.generate(
                 **inputs,
@@ -84,8 +92,14 @@ class InferencePipeline:
                 temperature=self.temperature,
                 do_sample=True,
                 pad_token_id=self.tokenizer.pad_token_id,
-                eos_token_id=self.tokenizer.eos_token_id
+                eos_token_id=self.tokenizer.eos_token_id,
+                use_cache=True  # Enable KV cache for speed, but it's per-generation only
             )
+
+        # Cleanup: Delete inputs to free memory immediately
+        del inputs
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
         
         full_output = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
         response = self._extract_assistant_response(full_output, prompt)

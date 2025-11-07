@@ -1,15 +1,14 @@
 #!/usr/bin/env python3
 """
-Malnutrition Model Evaluation Script - v1.2.0 (Multi-Step Reasoning)
-====================================================================
+Malnutrition Model Evaluation Script - v1.3.0 (Simplified 2-Step Reasoning)
+===========================================================================
 Evaluates trained MedDialogue malnutrition models on test datasets.
-Uses multi-step clinical reasoning:
-  1. Evidence Gathering: Anthropometrics, symptoms, intake data
-  2. Clinical Reasoning: Apply diagnostic criteria and explain rationale
-  3. Final Classification: JSON output with malnutrition status
+Uses streamlined 2-step clinical reasoning:
+  1. Clinical Assessment: Identify key evidence and apply diagnostic criteria
+  2. Final Classification: JSON output with malnutrition status
 
 Forces JSON output: {"malnutrition_status": "Malnutrition Present/Absent"}
-Prints all reasoning steps to terminal for transparency.
+Prints reasoning steps to terminal for transparency.
 
 Required CSV columns:
   - txt: Clinical note text
@@ -18,7 +17,7 @@ Required CSV columns:
 
 Author: Frederick Gyasi (gyasi@musc.edu)
 Institution: Medical University of South Carolina, Biomedical Informatics Center
-Version: 1.2.0
+Version: 1.3.0
 """
 import os
 import sys
@@ -57,15 +56,16 @@ logger = logging.getLogger(__name__)
 
 class MalnutritionEvaluator:
     """
-    Evaluator for malnutrition classification models with multi-step reasoning.
+    Evaluator for malnutrition classification models with 2-step reasoning.
 
     Handles:
     - Model loading (adapter or merged)
-    - Multi-step clinical reasoning (3 questions)
+    - Streamlined clinical reasoning (2 questions)
     - Batch inference with progress tracking
     - JSON response enforcement
     - Comprehensive metrics calculation
     - Results saving (CSV, JSON, plots)
+    - Proper inference isolation (no history carryover between samples)
     """
 
     # Patterns to extract malnutrition status from responses (fallback if JSON fails)
@@ -123,11 +123,11 @@ class MalnutritionEvaluator:
             output_formats=[OutputFormat.JSON, OutputFormat.TEXT]
         )
 
-        logger.info(f"Evaluator initialized for {model_type} (Multi-Step Reasoning v1.2)")
+        logger.info(f"Evaluator initialized for {model_type} (Simplified 2-Step Reasoning v1.3)")
         logger.info(f"Model path: {model_path}")
         logger.info(f"Temperature: {temperature}")
         logger.info(f"Max tokens: {max_new_tokens}")
-        logger.info(f"Reasoning: 3-step process (Evidence → Diagnosis → Classification)")
+        logger.info(f"Reasoning: 2-step process (Assessment → Classification)")
 
     def load_model(self, max_seq_length: int = 16384):
         """Load trained model for inference."""
@@ -184,17 +184,18 @@ class MalnutritionEvaluator:
             temperature=self.temperature,
             device=self.device
         )
-        logger.info("Inference pipeline initialized for multi-step reasoning")
+        logger.info("Inference pipeline initialized for 2-step reasoning")
         logger.info("="*80)
 
     def infer_single(self, clinical_note: str) -> Tuple[str, int, float]:
         """
-        Run inference on single clinical note using multi-step reasoning.
+        Run inference on single clinical note using 2-step reasoning.
 
-        Uses 3-step clinical reasoning process:
-        1. Evidence Gathering: Identify key anthropometric, clinical, and intake findings
-        2. Diagnosis & Reasoning: Synthesize evidence and explain clinical reasoning
-        3. Final Classification: Make final malnutrition status determination with JSON
+        Uses streamlined 2-step clinical reasoning process:
+        1. Clinical Assessment: Identify key evidence and apply diagnostic criteria
+        2. Final Classification: Make final malnutrition status determination with JSON
+
+        Each inference is independent to ensure no state carryover between samples.
 
         Args:
             clinical_note: Clinical text
@@ -203,85 +204,67 @@ class MalnutritionEvaluator:
             Tuple of (combined_response, predicted_label, confidence)
         """
         print("\n" + "="*80)
-        print("MULTI-STEP REASONING PROCESS")
+        print("2-STEP CLINICAL REASONING PROCESS")
         print("="*80)
 
-        # STEP 1: Evidence Gathering
-        evidence_question = (
-            "What are the key pieces of evidence for assessing malnutrition in this patient? "
-            "Specifically identify: (1) Anthropometric data (weight, BMI, percentiles, z-scores, trends), "
-            "(2) Clinical symptoms and physical exam findings, and (3) Nutritional intake patterns. "
-            "Be concise and focus on the most relevant findings."
+        # STEP 1: Clinical Assessment (Evidence + Reasoning Combined)
+        assessment_question = (
+            "Assess this patient for malnutrition. Identify key clinical evidence: "
+            "(1) Growth data (weight, BMI, percentiles, z-scores), "
+            "(2) Clinical signs (wasting, stunting, edema), "
+            "(3) Nutritional intake. "
+            "Then apply diagnostic criteria (ASPEN/WHO/AND) and explain if criteria are met."
         )
-        print(f"\nSTEP 1 - Evidence Gathering:")
-        print(f"Q: {evidence_question}")
+        print(f"\nSTEP 1 - Clinical Assessment:")
+        print(f"Q: {assessment_question}")
 
-        evidence_response = self.inference_pipeline.infer(
+        assessment_response = self.inference_pipeline.infer(
             clinical_note=clinical_note,
-            question=evidence_question,
+            question=assessment_question,
             output_format=OutputFormat.TEXT,
             return_full_response=False
         )
-        print(f"A: {evidence_response}\n")
+        print(f"A: {assessment_response}\n")
 
-        # STEP 2: Diagnosis and Clinical Reasoning
-        reasoning_question = (
-            "Based on the evidence you identified, what is your diagnostic assessment? "
-            "Apply clinical criteria (ASPEN, WHO, or AND guidelines) and explain your reasoning: "
-            "Does this patient meet diagnostic criteria for malnutrition? If so, what severity? "
-            "What is your clinical rationale? Be specific about which criteria are met or not met."
-        )
-        print(f"STEP 2 - Diagnosis & Clinical Reasoning:")
-        print(f"Q: {reasoning_question}")
-
-        reasoning_response = self.inference_pipeline.infer(
-            clinical_note=clinical_note,
-            question=reasoning_question,
-            output_format=OutputFormat.TEXT,
-            return_full_response=False
-        )
-        print(f"A: {reasoning_response}\n")
-
-        # STEP 3: Final Classification with JSON
-        final_question = (
-            "Based on your assessment and reasoning, is malnutrition present or absent in this patient? "
-            "Answer in strict JSON format ONLY: "
+        # STEP 2: Final Classification with JSON
+        classification_question = (
+            "Based on your clinical assessment, classify the malnutrition status. "
+            "Answer in strict JSON format: "
             "{\"malnutrition_status\": \"Malnutrition Present\"} or "
             "{\"malnutrition_status\": \"Malnutrition Absent\"}. "
-            "Provide ONLY the JSON object, no additional text."
+            "Provide ONLY the JSON object."
         )
-        print(f"STEP 3 - Final Classification:")
-        print(f"Q: {final_question}")
+        print(f"STEP 2 - Final Classification:")
+        print(f"Q: {classification_question}")
 
-        final_response = self.inference_pipeline.infer(
+        classification_response = self.inference_pipeline.infer(
             clinical_note=clinical_note,
-            question=final_question,
+            question=classification_question,
             output_format=OutputFormat.JSON,
             return_full_response=False
         )
-        print(f"A: {final_response}\n")
+        print(f"A: {classification_response}\n")
 
-        # Try to extract JSON from final response
-        json_response = self._extract_json_response(str(final_response))
+        # Try to extract JSON from classification response
+        json_response = self._extract_json_response(str(classification_response))
         print("JSON OUTPUT:")
         print(json.dumps(json_response, indent=2))
         print("="*80 + "\n")
 
-        # Parse classification from JSON (fallback to regex on all responses)
+        # Parse classification from JSON (fallback to regex if needed)
         predicted_label, confidence = self._parse_from_json_or_fallback(
-            json_response, str(final_response)
+            json_response, str(classification_response)
         )
 
-        # If JSON parsing fails, try reasoning from the full conversation
+        # If JSON parsing fails, try parsing from assessment response
         if confidence < 0.7:
-            full_reasoning = f"{evidence_response} {reasoning_response} {final_response}"
-            predicted_label, confidence = self._parse_classification(full_reasoning)
+            full_text = f"{assessment_response} {classification_response}"
+            predicted_label, confidence = self._parse_classification(full_text)
 
-        # Combine all responses for logging
+        # Combine responses for logging
         combined_response = (
-            f"[EVIDENCE]\n{evidence_response}\n\n"
-            f"[REASONING]\n{reasoning_response}\n\n"
-            f"[CLASSIFICATION]\n{final_response}"
+            f"[ASSESSMENT]\n{assessment_response}\n\n"
+            f"[CLASSIFICATION]\n{classification_response}"
         )
 
         return combined_response, predicted_label, confidence
@@ -331,9 +314,9 @@ class MalnutritionEvaluator:
         output_dir: str,
         save_predictions: bool = True
     ) -> Dict[str, Any]:
-        """Evaluate model on test dataset using multi-step reasoning."""
+        """Evaluate model on test dataset using 2-step reasoning."""
         logger.info("="*80)
-        logger.info("EVALUATION STARTING (MULTI-STEP REASONING)")
+        logger.info("EVALUATION STARTING (2-STEP REASONING)")
         logger.info("="*80)
         logger.info(f"Test CSV: {test_csv}")
         logger.info(f"Output dir: {output_dir}")
@@ -403,9 +386,9 @@ class MalnutritionEvaluator:
             "error_examples": error_count,
             "temperature": self.temperature,
             "max_new_tokens": self.max_new_tokens,
-            "output_mode": "Multi-Step Reasoning + JSON",
-            "reasoning_steps": 3,
-            "reasoning_process": "Evidence Gathering → Diagnosis & Reasoning → Final Classification",
+            "output_mode": "2-Step Reasoning + JSON",
+            "reasoning_steps": 2,
+            "reasoning_process": "Clinical Assessment → Final Classification",
             "metrics": metrics
         }
 
@@ -495,7 +478,7 @@ class MalnutritionEvaluator:
 
         with open(report_path, "w") as f:
             f.write("="*80 + "\n")
-            f.write("MALNUTRITION MODEL EVALUATION SUMMARY (MULTI-STEP REASONING)\n")
+            f.write("MALNUTRITION MODEL EVALUATION SUMMARY (2-STEP REASONING)\n")
             f.write("="*80 + "\n\n")
             f.write(f"Model: {results['model_path']}\n")
             f.write(f"Model Type: {results['model_type']}\n")
@@ -555,7 +538,7 @@ class MalnutritionEvaluator:
         cm = metrics["confusion_matrix"]
 
         print("\n" + "="*80)
-        print("EVALUATION RESULTS (MULTI-STEP REASONING)")
+        print("EVALUATION RESULTS (2-STEP REASONING)")
         print("="*80)
         print(f"\nModel: {results['model_path']}")
         print(f"Test examples: {results['valid_examples']}")
@@ -580,7 +563,7 @@ class MalnutritionEvaluator:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Evaluate trained malnutrition model on test set (Multi-Step Reasoning v1.2.0)",
+        description="Evaluate trained malnutrition model on test set (2-Step Reasoning v1.3.0)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Example usage:
@@ -589,12 +572,11 @@ Example usage:
     --csv test_data.csv \\
     --output ./eval_results
 
-Multi-Step Reasoning Process:
-  Step 1: Evidence Gathering - Identify key anthropometric, clinical, and intake findings
-  Step 2: Diagnosis & Reasoning - Apply clinical criteria and explain reasoning
-  Step 3: Final Classification - Make final determination with JSON output
+Streamlined 2-Step Reasoning Process:
+  Step 1: Clinical Assessment - Identify evidence and apply diagnostic criteria
+  Step 2: Final Classification - Make determination with JSON output
 
-This approach mirrors clinical decision-making: Gather → Reason → Classify
+This efficient approach maintains clinical rigor while reducing redundancy.
         """
     )
 
@@ -618,7 +600,7 @@ This approach mirrors clinical decision-making: Gather → Reason → Classify
 
     logger.info("")
     logger.info("="*80)
-    logger.info("MALNUTRITION MODEL EVALUATION v1.2.0 (MULTI-STEP REASONING)")
+    logger.info("MALNUTRITION MODEL EVALUATION v1.3.0 (2-STEP REASONING)")
     logger.info("="*80)
     logger.info(f"Model: {args.model}")
     logger.info(f"Model type: {args.model_type}")
@@ -654,15 +636,14 @@ This approach mirrors clinical decision-making: Gather → Reason → Classify
 
         logger.info(f"\nEvaluation completed successfully!")
         logger.info(f"Results saved to: {args.output}")
-        logger.info(f"  - predictions.csv: Includes multi-step reasoning responses and json_output")
+        logger.info(f"  - predictions.csv: Includes 2-step reasoning responses and json_output")
         logger.info(f"  - metrics.json: Comprehensive metrics with reasoning metadata")
         logger.info(f"  - evaluation_summary.txt: Human-readable report with reasoning details")
         logger.info("")
-        logger.info("Multi-Step Reasoning Summary:")
-        logger.info(f"  Step 1: Evidence Gathering")
-        logger.info(f"  Step 2: Clinical Diagnosis & Reasoning")
-        logger.info(f"  Step 3: Final Classification (JSON)")
-        logger.info(f"This approach provides transparent, explainable clinical decision-making.")
+        logger.info("2-Step Reasoning Summary:")
+        logger.info(f"  Step 1: Clinical Assessment (Evidence + Criteria)")
+        logger.info(f"  Step 2: Final Classification (JSON)")
+        logger.info(f"Streamlined approach provides efficient, transparent clinical decision-making.")
 
         return 0
 
