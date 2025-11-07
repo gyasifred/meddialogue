@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """
-Malnutrition Model Evaluation Script - v1.4.0 (True Multi-Turn Reasoning)
-==========================================================================
+Malnutrition Model Evaluation Script - v1.5.0 (True Multi-Turn + Fixed JSON Extraction)
+========================================================================================
 Evaluates trained MedDialogue malnutrition models on test datasets.
 
-CRITICAL FIX: Now uses TRUE multi-turn conversations matching training format!
+CRITICAL FIXES:
+  - v1.5.0: Fixed JSON extraction bug (was extracting wrong status from question examples)
+  - v1.4.0: Now uses TRUE multi-turn conversations matching training format
 
 Uses 2-step multi-turn clinical reasoning:
   1. Clinical Assessment: Identify key evidence and apply diagnostic criteria
@@ -13,6 +15,12 @@ Uses 2-step multi-turn clinical reasoning:
 Training/Inference Match:
   - Turn 1: Question + Clinical Note → Assessment
   - Turn 2: Question only (with Turn 1 context) → Classification
+
+JSON Extraction (v1.5.0 FIX):
+  - Handles single quotes ('Malnutrition Present') and double quotes
+  - Extracts LAST valid JSON object (actual answer, not question examples)
+  - Non-greedy regex prevents matching across multiple JSON objects
+  - Robust handling of embedded examples in prompt
 
 Forces JSON output: {"malnutrition_status": "Malnutrition Present/Absent"}
 Prints reasoning steps to terminal for transparency.
@@ -24,7 +32,7 @@ Required CSV columns:
 
 Author: Frederick Gyasi (gyasi@musc.edu)
 Institution: Medical University of South Carolina, Biomedical Informatics Center
-Version: 1.4.0
+Version: 1.5.0
 """
 import os
 import sys
@@ -225,11 +233,12 @@ class MalnutritionEvaluator:
         )
 
         classification_question = (
-            "Based on your clinical assessment, classify the malnutrition status. "
-            "Answer in strict JSON format: "
-            "{\"malnutrition_status\": \"Malnutrition Present\"} or "
-            "{\"malnutrition_status\": \"Malnutrition Absent\"}. "
-            "Provide ONLY the JSON object."
+            "Based on your clinical assessment, provide the final malnutrition classification. "
+            "Respond with ONLY a JSON object in this exact format: "
+            '{"malnutrition_status": "Malnutrition Present"} '
+            "OR "
+            '{"malnutrition_status": "Malnutrition Absent"}. '
+            "Do not include any other text, just the JSON."
         )
 
         questions = [assessment_question, classification_question]
@@ -281,16 +290,39 @@ class MalnutritionEvaluator:
         return combined_response, predicted_label, confidence
 
     def _extract_json_response(self, response: str) -> Dict:
-        """Extract JSON from response using regex (robust to extra text)."""
-        # Find JSON block
-        json_match = re.search(r'\{.*"malnutrition_status".*?\}', response, re.DOTALL)
-        if json_match:
-            try:
-                return json.loads(json_match.group())
-            except json.JSONDecodeError:
-                pass
+        """
+        Extract JSON from response with robust handling.
+
+        CRITICAL FIX: Handles multiple JSON objects, single quotes, and embedded examples.
+        Takes the LAST valid JSON object (most likely to be the actual answer).
+        """
+        # Normalize: Replace single quotes with double quotes for Python dict-style JSON
+        response_normalized = response.replace("'", '"')
+
+        # Find ALL JSON blocks (non-greedy)
+        # Use non-greedy .*? to avoid matching across multiple objects
+        json_matches = re.findall(r'\{[^{}]*?"malnutrition_status"[^{}]*?\}', response_normalized, re.DOTALL)
+
+        if json_matches:
+            # Try parsing from LAST match (most likely to be the actual answer, not an example)
+            for json_str in reversed(json_matches):
+                try:
+                    parsed = json.loads(json_str)
+                    # Validate it has the expected key
+                    if "malnutrition_status" in parsed:
+                        return parsed
+                except json.JSONDecodeError:
+                    continue
+
+            # If all fail, try first match
+            for json_str in json_matches:
+                try:
+                    return json.loads(json_str)
+                except json.JSONDecodeError:
+                    continue
 
         # Fallback: return default
+        logger.warning(f"Could not extract valid JSON from response: {response[:200]}")
         return {"malnutrition_status": "Malnutrition Absent"}
 
     def _parse_from_json_or_fallback(self, json_obj: Dict, raw_response: str) -> Tuple[int, float]:
