@@ -237,6 +237,10 @@ class InferencePipeline:
         - Turn 1: Includes clinical note
         - Turn 2+: Uses conversation context (no repeated note)
 
+        IMPORTANT: Each call to this method creates a FRESH conversation.
+        No history is carried over between different calls (different samples).
+        Within a single call, turns build on each other (Turn 2 sees Turn 1).
+
         Args:
             clinical_note: Clinical text
             questions: List of questions for each turn
@@ -254,7 +258,7 @@ class InferencePipeline:
         if len(output_formats) != len(questions):
             raise ValueError(f"Number of output_formats ({len(output_formats)}) must match number of questions ({len(questions)})")
 
-        # Build cumulative conversation
+        # Build cumulative conversation - FRESH for each call (no carryover between samples)
         conversation = [
             {"role": "system", "content": self.task_config.get_system_prompt()}
         ]

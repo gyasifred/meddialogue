@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
 """
-Malnutrition Model Evaluation Script - v1.5.0 (True Multi-Turn + Fixed JSON Extraction)
-========================================================================================
+Malnutrition Model Evaluation Script - v1.6.0 (Optimized for Speed + Clean State)
+==================================================================================
 Evaluates trained MedDialogue malnutrition models on test datasets.
 
 CRITICAL FIXES:
+  - v1.6.0: Shortened questions for faster inference; verified clean state between samples
   - v1.5.0: Fixed JSON extraction bug (was extracting wrong status from question examples)
   - v1.4.0: Now uses TRUE multi-turn conversations matching training format
 
-Uses 2-step multi-turn clinical reasoning:
-  1. Clinical Assessment: Identify key evidence and apply diagnostic criteria
-  2. Final Classification: JSON output with malnutrition status (sees Step 1)
+Uses 2-step multi-turn clinical reasoning (OPTIMIZED CONCISE QUESTIONS):
+  1. Clinical Assessment: "Assess for malnutrition. Identify key evidence and apply diagnostic criteria."
+  2. Final Classification: "Provide classification as JSON: {...}"
 
 Training/Inference Match:
   - Turn 1: Question + Clinical Note → Assessment
@@ -32,7 +33,7 @@ Required CSV columns:
 
 Author: Frederick Gyasi (gyasi@musc.edu)
 Institution: Medical University of South Carolina, Biomedical Informatics Center
-Version: 1.5.0
+Version: 1.6.0
 """
 import os
 import sys
@@ -213,6 +214,9 @@ class MalnutritionEvaluator:
         CRITICAL: Uses multi-turn conversation where Step 2 sees Step 1's response
         (matching training format, NOT independent calls).
 
+        IMPORTANT: Each call creates a FRESH conversation with NO history from
+        previous calls. This ensures clean state between different patient samples.
+
         Args:
             clinical_note: Clinical text
 
@@ -223,22 +227,15 @@ class MalnutritionEvaluator:
         print("2-STEP MULTI-TURN REASONING PROCESS (Training-Matched)")
         print("="*80)
 
-        # Define questions for both turns
+        # Define questions for both turns (SHORTENED FOR SPEED)
         assessment_question = (
-            "Assess this patient for malnutrition. Identify key clinical evidence: "
-            "(1) Growth data (weight, BMI, percentiles, z-scores), "
-            "(2) Clinical signs (wasting, stunting, edema), "
-            "(3) Nutritional intake. "
-            "Then apply diagnostic criteria (ASPEN/WHO/AND) and explain if criteria are met."
+            "Assess for malnutrition. Identify key evidence and apply diagnostic criteria."
         )
 
         classification_question = (
-            "Based on your clinical assessment, provide the final malnutrition classification. "
-            "Respond with ONLY a JSON object in this exact format: "
-            '{"malnutrition_status": "Malnutrition Present"} '
-            "OR "
-            '{"malnutrition_status": "Malnutrition Absent"}. '
-            "Do not include any other text, just the JSON."
+            "Provide classification as JSON: "
+            '{"malnutrition_status": "Malnutrition Present"} or '
+            '{"malnutrition_status": "Malnutrition Absent"}'
         )
 
         questions = [assessment_question, classification_question]
@@ -384,8 +381,10 @@ class MalnutritionEvaluator:
         json_outputs = []
 
         logger.info("Running inference on test set...")
+        # IMPORTANT: Each infer_single() call creates fresh conversation (no history carryover)
         for idx, row in tqdm(df.iterrows(), total=len(df), desc="Evaluating"):
             try:
+                # Each sample processed independently with clean state
                 response, pred, conf = self.infer_single(row["txt"])
                 json_obj = self._extract_json_response(response)
                 predictions.append(pred)
