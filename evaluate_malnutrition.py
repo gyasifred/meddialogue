@@ -1,33 +1,23 @@
 #!/usr/bin/env python3
 """
-Malnutrition Model Evaluation Script - v2.0.0 (Logical Multi-Turn + Memory Optimization)
-=========================================================================================
+Malnutrition Model Evaluation Script - v3.0.0 (Streamlined Chain-of-Thought)
+=============================================================================
 Evaluates trained MedDialogue malnutrition models on test datasets.
 
 CRITICAL CHANGES:
+  - v3.0.0: Streamlined 3-step chain-of-thought matching training reasoning
   - v2.0.0: 5-step logical multi-turn matching training order + garbage collection
   - v1.7.0: Reduced Step 1 to 2 key aspects (growth/anthropometrics + clinical signs) for speed
-  - v1.6.0: Shortened questions for faster inference; verified clean state between samples
-  - v1.5.0: Fixed JSON extraction bug (was extracting wrong status from question examples)
-  - v1.4.0: Now uses TRUE multi-turn conversations matching training format
 
-Uses 5-step multi-turn clinical reasoning (MATCHES TRAINING LOGICAL ORDER):
-  1. Growth & Anthropometrics - Data collection
-  2. Labs & Screening - Laboratory findings
-  3. Clinical Symptoms & Signs - Physical findings
-  4. Diagnosis & Reasoning - Clinical synthesis
-  5. Malnutrition Status - Final classification (JSON)
+Uses 3-step multi-turn clinical reasoning (MATCHES TRAINING LOGICAL ORDER):
+  1. Clinical Assessment - Growth, symptoms, labs combined (priority 1 fields)
+  2. Diagnosis & Reasoning - Clinical synthesis and reasoning (priority 2)
+  3. Malnutrition Status - Final classification (priority 3)
 
 Training/Inference Match:
-  - Turn 1: Question + Clinical Note → Growth assessment
-  - Turn 2-4: Question only (with context) → Labs, Symptoms, Diagnosis
-  - Turn 5: Question only (with full context) → Final status (JSON)
-
-JSON Extraction (v1.5.0 FIX):
-  - Handles single quotes ('Malnutrition Present') and double quotes
-  - Extracts LAST valid JSON object (actual answer, not question examples)
-  - Non-greedy regex prevents matching across multiple JSON objects
-  - Robust handling of embedded examples in prompt
+  - Turn 1: Assessment Question + Clinical Note → Comprehensive data collection
+  - Turn 2: Diagnosis Question (with context) → Clinical reasoning
+  - Turn 3: Status Question (with full context) → Final classification (JSON)
 
 Forces JSON output: {"malnutrition_status": "Malnutrition Present/Absent"}
 Prints reasoning steps to terminal for transparency.
@@ -39,7 +29,7 @@ Required CSV columns:
 
 Author: Frederick Gyasi (gyasi@musc.edu)
 Institution: Medical University of South Carolina, Biomedical Informatics Center
-Version: 2.0.0
+Version: 3.0.0
 """
 import os
 import sys
@@ -79,11 +69,11 @@ logger = logging.getLogger(__name__)
 
 class MalnutritionEvaluator:
     """
-    Evaluator for malnutrition classification models with 5-step logical reasoning.
+    Evaluator for malnutrition classification models with 3-step chain-of-thought reasoning.
 
     Handles:
     - Model loading (adapter or merged)
-    - 5-step clinical reasoning matching training logical order
+    - 3-step clinical reasoning matching training logical order
     - Batch inference with progress tracking
     - JSON response enforcement
     - Comprehensive metrics calculation
@@ -147,11 +137,11 @@ class MalnutritionEvaluator:
             output_formats=[OutputFormat.JSON, OutputFormat.TEXT]
         )
 
-        logger.info(f"Evaluator initialized for {model_type} (True Multi-Turn Reasoning v1.4)")
+        logger.info(f"Evaluator initialized for {model_type} (3-Step Chain-of-Thought v3.0)")
         logger.info(f"Model path: {model_path}")
         logger.info(f"Temperature: {temperature}")
         logger.info(f"Max tokens: {max_new_tokens}")
-        logger.info(f"Reasoning: 2-step multi-turn (Assessment → Classification with context)")
+        logger.info(f"Reasoning: 3-step multi-turn (Assessment → Diagnosis → Classification)")
 
     def load_model(self, max_seq_length: int = 16384):
         """Load trained model for inference."""
@@ -208,19 +198,17 @@ class MalnutritionEvaluator:
             temperature=self.temperature,
             device=self.device
         )
-        logger.info("Inference pipeline initialized for 5-step logical multi-turn reasoning")
+        logger.info("Inference pipeline initialized for 3-step chain-of-thought reasoning")
         logger.info("="*80)
 
     def infer_single(self, clinical_note: str) -> Tuple[str, int, float]:
         """
-        Run inference on single clinical note using TRUE 5-step multi-turn reasoning.
+        Run inference on single clinical note using 3-step chain-of-thought reasoning.
 
-        Uses 5-step logical clinical reasoning process that MATCHES TRAINING ORDER:
-        1. Growth & Anthropometrics - Collect anthropometric data
-        2. Labs & Screening - Assess laboratory findings
-        3. Clinical Symptoms & Signs - Document physical findings
-        4. Diagnosis & Reasoning - Synthesize clinical reasoning
-        5. Malnutrition Status - Final classification (JSON)
+        Uses 3-step logical clinical reasoning that MATCHES TRAINING ORDER:
+        1. Clinical Assessment - Collect ALL data (growth, symptoms, labs, exam)
+        2. Diagnosis & Reasoning - Synthesize evidence with clinical reasoning
+        3. Malnutrition Status - Final classification (JSON)
 
         CRITICAL: Uses multi-turn conversation where each step sees previous steps
         (matching training format, NOT independent calls).
@@ -235,50 +223,50 @@ class MalnutritionEvaluator:
             Tuple of (combined_response, predicted_label, confidence)
         """
         print("\n" + "="*80)
-        print("5-STEP LOGICAL MULTI-TURN REASONING (Training-Matched Order)")
+        print("3-STEP CHAIN-OF-THOUGHT REASONING (Training-Matched Order)")
         print("="*80)
 
         # Define questions from training templates in LOGICAL ORDER
-        # Follows training FIELD_ORDERING: data collection → reasoning → classification
+        # Follows training FIELD_ORDERING: assessment (1) → reasoning (2) → classification (3)
 
-        growth_question = (
-            "What are ALL anthropometric measurements with DATES? Calculate trends and trajectories."
+        # Step 1: Comprehensive Clinical Assessment (combines all priority 1 fields)
+        assessment_question = (
+            "Analyze this patient comprehensively: "
+            "1) What are ALL anthropometric measurements with dates and trends? "
+            "2) What clinical symptoms and signs are present with onset and progression? "
+            "3) What labs are available with trends? "
+            "4) What physical exam findings support your assessment? "
+            "Calculate trajectories and identify concerning patterns."
         )
 
-        labs_question = (
-            "What labs are available with DATES? For each lab, describe the trend and rate of change."
-        )
-
-        symptoms_question = (
-            "What are ALL the clinical symptoms and signs? For EACH symptom, give onset dates and progression."
-        )
-
+        # Step 2: Diagnosis with Clinical Reasoning (priority 2)
         diagnosis_question = (
-            "What's your diagnosis with complete clinical reasoning? Synthesize ALL evidence temporally."
+            "Based on your assessment, what is your diagnosis with complete clinical reasoning? "
+            "Walk through your diagnostic thought process: What evidence supports your conclusion? "
+            "Address severity, etiology (illness-related vs intake-related), and acuity (acute vs chronic). "
+            "How confident are you in this diagnosis?"
         )
 
+        # Step 3: Final Classification (priority 3)
         status_question = (
-            "Is malnutrition present or absent? State clearly. "
+            "Based on your diagnosis and reasoning, is malnutrition present or absent? "
+            "State clearly with brief justification. "
             "Respond with JSON: "
             '{"malnutrition_status": "Malnutrition Present"} or '
             '{"malnutrition_status": "Malnutrition Absent"}'
         )
 
-        questions = [growth_question, labs_question, symptoms_question, diagnosis_question, status_question]
-        output_formats = [OutputFormat.TEXT, OutputFormat.TEXT, OutputFormat.TEXT, OutputFormat.TEXT, OutputFormat.JSON]
+        questions = [assessment_question, diagnosis_question, status_question]
+        output_formats = [OutputFormat.TEXT, OutputFormat.TEXT, OutputFormat.JSON]
 
-        print("\nSTEP 1 - Growth & Anthropometrics:")
-        print(f"Q: {growth_question}\n")
-        print("STEP 2 - Labs & Screening:")
-        print(f"Q: {labs_question}\n")
-        print("STEP 3 - Clinical Symptoms & Signs:")
-        print(f"Q: {symptoms_question}\n")
-        print("STEP 4 - Diagnosis & Reasoning:")
+        print("\nSTEP 1 - Clinical Assessment (Data Collection):")
+        print(f"Q: {assessment_question}\n")
+        print("STEP 2 - Diagnosis & Reasoning (Clinical Synthesis):")
         print(f"Q: {diagnosis_question}\n")
-        print("STEP 5 - Malnutrition Status (JSON):")
+        print("STEP 3 - Malnutrition Status (Final Classification):")
         print(f"Q: {status_question}\n")
         print("=" * 80)
-        print("Running 5-STEP LOGICAL MULTI-TURN inference (each step sees previous)...\n")
+        print("Running 3-STEP CHAIN-OF-THOUGHT inference (each step sees previous)...\n")
 
         # Use multi-turn inference (matches training!)
         responses = self.inference_pipeline.infer_multi_turn(
@@ -288,17 +276,13 @@ class MalnutritionEvaluator:
             return_full_response=False
         )
 
-        growth_response = responses[0]
-        labs_response = responses[1]
-        symptoms_response = responses[2]
-        diagnosis_response = responses[3]
-        status_response = responses[4]
+        assessment_response = responses[0]
+        diagnosis_response = responses[1]
+        status_response = responses[2]
 
-        print(f"STEP 1 RESPONSE (Growth):\n{growth_response}\n")
-        print(f"STEP 2 RESPONSE (Labs):\n{labs_response}\n")
-        print(f"STEP 3 RESPONSE (Symptoms):\n{symptoms_response}\n")
-        print(f"STEP 4 RESPONSE (Diagnosis):\n{diagnosis_response}\n")
-        print(f"STEP 5 RESPONSE (Status):\n{status_response}\n")
+        print(f"STEP 1 RESPONSE (Assessment):\n{assessment_response}\n")
+        print(f"STEP 2 RESPONSE (Diagnosis):\n{diagnosis_response}\n")
+        print(f"STEP 3 RESPONSE (Status):\n{status_response}\n")
 
         # Try to extract JSON from status response
         json_response = self._extract_json_response(str(status_response))
@@ -316,17 +300,15 @@ class MalnutritionEvaluator:
             full_text = f"{diagnosis_response} {status_response}"
             predicted_label, confidence = self._parse_classification(full_text)
 
-        # Combine responses for logging (all 5 steps)
+        # Combine responses for logging (all 3 steps)
         combined_response = (
-            f"[STEP 1 - GROWTH]\n{growth_response}\n\n"
-            f"[STEP 2 - LABS]\n{labs_response}\n\n"
-            f"[STEP 3 - SYMPTOMS]\n{symptoms_response}\n\n"
-            f"[STEP 4 - DIAGNOSIS]\n{diagnosis_response}\n\n"
-            f"[STEP 5 - STATUS]\n{status_response}"
+            f"[STEP 1 - ASSESSMENT]\n{assessment_response}\n\n"
+            f"[STEP 2 - DIAGNOSIS]\n{diagnosis_response}\n\n"
+            f"[STEP 3 - STATUS]\n{status_response}"
         )
 
         # Clear references to allow garbage collection
-        del responses, growth_response, labs_response, symptoms_response, diagnosis_response, status_response
+        del responses, assessment_response, diagnosis_response, status_response
 
         return combined_response, predicted_label, confidence
 
@@ -398,9 +380,9 @@ class MalnutritionEvaluator:
         output_dir: str,
         save_predictions: bool = True
     ) -> Dict[str, Any]:
-        """Evaluate model on test dataset using TRUE 2-step multi-turn reasoning."""
+        """Evaluate model on test dataset using 3-step chain-of-thought reasoning."""
         logger.info("="*80)
-        logger.info("EVALUATION STARTING (2-STEP MULTI-TURN REASONING)")
+        logger.info("EVALUATION STARTING (3-STEP CHAIN-OF-THOUGHT REASONING)")
         logger.info("="*80)
         logger.info(f"Test CSV: {test_csv}")
         logger.info(f"Output dir: {output_dir}")
@@ -485,10 +467,10 @@ class MalnutritionEvaluator:
             "error_examples": error_count,
             "temperature": self.temperature,
             "max_new_tokens": self.max_new_tokens,
-            "output_mode": "5-Step Logical Multi-Turn Reasoning + JSON",
-            "reasoning_steps": 5,
-            "reasoning_process": "Growth → Labs → Symptoms → Diagnosis → Status (with full context)",
-            "reasoning_order": "growth_and_anthropometrics → labs_and_screening → clinical_symptoms_and_signs → diagnosis_and_reasoning → malnutrition_status",
+            "output_mode": "3-Step Chain-of-Thought Reasoning + JSON",
+            "reasoning_steps": 3,
+            "reasoning_process": "Assessment → Diagnosis → Status (with full context)",
+            "reasoning_order": "clinical_assessment → diagnosis_and_reasoning → malnutrition_status",
             "training_inference_match": "True (multi-turn conversations with logical field ordering)",
             "memory_optimization": "Garbage collection every 10 samples + final cleanup",
             "metrics": metrics
@@ -580,7 +562,7 @@ class MalnutritionEvaluator:
 
         with open(report_path, "w") as f:
             f.write("="*80 + "\n")
-            f.write("MALNUTRITION MODEL EVALUATION SUMMARY (2-STEP MULTI-TURN)\n")
+            f.write("MALNUTRITION MODEL EVALUATION SUMMARY (3-STEP CHAIN-OF-THOUGHT)\n")
             f.write("="*80 + "\n\n")
             f.write(f"Model: {results['model_path']}\n")
             f.write(f"Model Type: {results['model_type']}\n")
@@ -640,7 +622,7 @@ class MalnutritionEvaluator:
         cm = metrics["confusion_matrix"]
 
         print("\n" + "="*80)
-        print("EVALUATION RESULTS (2-STEP MULTI-TURN REASONING)")
+        print("EVALUATION RESULTS (3-STEP CHAIN-OF-THOUGHT REASONING)")
         print("="*80)
         print(f"\nModel: {results['model_path']}")
         print(f"Test examples: {results['valid_examples']}")
@@ -665,7 +647,7 @@ class MalnutritionEvaluator:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Evaluate trained malnutrition model on test set (True Multi-Turn v1.4.0)",
+        description="Evaluate trained malnutrition model on test set (3-Step Chain-of-Thought v3.0.0)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Example usage:
@@ -674,12 +656,12 @@ Example usage:
     --csv test_data.csv \\
     --output ./eval_results
 
-TRUE Multi-Turn 2-Step Reasoning Process (Matches Training!):
-  Turn 1: Clinical Assessment + Clinical Note → Assessment Response
-  Turn 2: Classification Question (with Turn 1 context) → JSON Output
+3-Step Chain-of-Thought Reasoning Process (Matches Training!):
+  Turn 1: Clinical Assessment + Clinical Note → Comprehensive data collection
+  Turn 2: Diagnosis Question (with Turn 1 context) → Clinical reasoning
+  Turn 3: Status Question (with full context) → Final classification (JSON)
 
-CRITICAL FIX: Step 2 now sees Step 1's answer (multi-turn conversation),
-matching the training format. No more independent single-turn calls!
+Each step builds on previous context for proper chain-of-thought reasoning.
         """
     )
 
@@ -703,7 +685,7 @@ matching the training format. No more independent single-turn calls!
 
     logger.info("")
     logger.info("="*80)
-    logger.info("MALNUTRITION MODEL EVALUATION v1.4.0 (TRUE MULTI-TURN)")
+    logger.info("MALNUTRITION MODEL EVALUATION v3.0.0 (3-STEP CHAIN-OF-THOUGHT)")
     logger.info("="*80)
     logger.info(f"Model: {args.model}")
     logger.info(f"Model type: {args.model_type}")
@@ -739,15 +721,15 @@ matching the training format. No more independent single-turn calls!
 
         logger.info(f"\nEvaluation completed successfully!")
         logger.info(f"Results saved to: {args.output}")
-        logger.info(f"  - predictions.csv: Includes 2-step multi-turn responses and json_output")
+        logger.info(f"  - predictions.csv: Includes 3-step chain-of-thought responses and json_output")
         logger.info(f"  - metrics.json: Comprehensive metrics with reasoning metadata")
         logger.info(f"  - evaluation_summary.txt: Human-readable report with reasoning details")
         logger.info("")
-        logger.info("True Multi-Turn 2-Step Reasoning Summary:")
-        logger.info(f"  Turn 1: Clinical Assessment (with clinical note)")
-        logger.info(f"  Turn 2: Final Classification (with Turn 1 context) → JSON")
-        logger.info(f"CRITICAL: Matches training format - Turn 2 sees Turn 1's response!")
-        logger.info(f"This approach provides efficient, contextual clinical decision-making.")
+        logger.info("3-Step Chain-of-Thought Reasoning Summary:")
+        logger.info(f"  Turn 1: Clinical Assessment (with clinical note) → Data collection")
+        logger.info(f"  Turn 2: Diagnosis & Reasoning (with Turn 1 context) → Clinical synthesis")
+        logger.info(f"  Turn 3: Final Classification (with full context) → JSON output")
+        logger.info(f"Each step builds on previous context for proper chain-of-thought reasoning.")
 
         return 0
 
