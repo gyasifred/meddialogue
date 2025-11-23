@@ -16,11 +16,10 @@ from typing import Optional, Dict, Any, Union, List
 from datetime import datetime
 
 from .config import (
-    TaskConfig, SafetyConfig, TrainingConfig, 
+    TaskConfig, SafetyConfig, TrainingConfig,
     ModelConfig, ConversationConfig, OutputFormat
 )
 from .data_prep import DataPrep
-from .safety import SafetyChecker
 from .train import Trainer
 from .inference import InferencePipeline
 from .models import ModelRegistry, get_device, optimize_memory
@@ -31,7 +30,7 @@ logger = logging.getLogger(__name__)
 class MedDialogue:
     """
     Main interface for MedDialogue framework.
-    
+
     Version 1.0.0 features:
     - True 1:1 mapping: Each clinical note → ONE training example
     - 16 question combination styles (7 grammatical + 9 logical reasoning)
@@ -39,7 +38,6 @@ class MedDialogue:
     - Balanced single-turn and multi-turn conversations
     - Optional validation split (set to 0.0 to use all data for training)
     - Optimized for modern LLMs (16K-32K token context)
-    - Enhanced safety and validation
     - Comprehensive logging and statistics
     
     Example:
@@ -93,21 +91,21 @@ class MedDialogue:
         training_config: Optional[TrainingConfig] = None,
         conversation_config: Optional[ConversationConfig] = None,
         output_dir: str = "./output",
-        enable_safety: bool = True,
+        enable_safety: bool = False,
         cuda_device: int = 0,
         verbose: bool = True
     ):
         """
         Initialize MedDialogue framework.
-        
+
         Args:
             task_config: Task configuration (required)
             model_type: Model type from ["llama", "phi-4", "mistral", "qwen"]
-            safety_config: Safety configuration (optional, uses defaults if None)
+            safety_config: Safety configuration (optional, deprecated)
             training_config: Training configuration (optional, uses defaults if None)
             conversation_config: Data multiplication configuration (optional, uses defaults if None)
             output_dir: Output directory for models and logs
-            enable_safety: Enable safety checks (PII detection, bias monitoring)
+            enable_safety: Deprecated parameter (ignored)
             cuda_device: CUDA device index (default: 0)
             verbose: Enable verbose logging (default: True)
         """
@@ -117,7 +115,7 @@ class MedDialogue:
         self.training_config = training_config or TrainingConfig()
         self.conversation_config = conversation_config or ConversationConfig()
         self.output_dir = output_dir
-        self.enable_safety = enable_safety
+        self.enable_safety = False  # Safety checks disabled
         self.cuda_device = cuda_device
         self.verbose = verbose
         
@@ -155,7 +153,6 @@ class MedDialogue:
         
         # Initialize components
         self.data_prep = DataPrep(task_config, conversation_config)
-        self.safety_checker = SafetyChecker(self.safety_config, task_config) if enable_safety else None
         self.trainer = None
         self.inference_pipeline = None
         
@@ -169,7 +166,6 @@ class MedDialogue:
         logger.info(f"Task: {task_config.task_name}")
         logger.info(f"Model: {model_type} ({self.model_config.model_name})")
         logger.info(f"Output fields: {', '.join(task_config.output_fields)}")
-        logger.info(f"Safety enabled: {enable_safety}")
         logger.info(f"Output directory: {output_dir}")
         logger.info("-" * 80)
         logger.info("Data Preparation Settings (v1.0.0):")
@@ -248,34 +244,9 @@ class MedDialogue:
         
         logger.info(f"Validated columns: {', '.join(required_cols)}")
         
-        # Run safety checks if enabled
+        # Safety checks removed - focus on core training
         safety_results = None
-        if self.enable_safety and run_safety_checks and self.safety_checker:
-            logger.info("-" * 80)
-            logger.info("Running safety checks...")
-            
-            safety_results = self.safety_checker.check_dataset(
-                data, 
-                text_column=self.task_config.input_field
-            )
-            
-            logger.info(f"PII detected: {safety_results.get('pii_detected', 'N/A')}")
-            logger.info(f"Bias issues: {safety_results.get('bias_detected', 'N/A')}")
-            logger.info(f"Safe for training: {safety_results.get('safe_for_training', False)}")
-            
-            if not safety_results.get("safe_for_training", False) and self.safety_config.block_on_safety_failure:
-                logger.error("Safety checks failed! Training blocked.")
-                raise ValueError(
-                    "Safety checks failed. Set safety_config.block_on_safety_failure=False "
-                    "to continue with warnings only."
-                )
-            
-            # Apply anonymization if PII detected
-            if self.safety_config.enable_pii_detection and safety_results.get("anonymized_texts"):
-                data = data.copy()
-                data[self.task_config.input_field] = safety_results["anonymized_texts"]
-                logger.info("Applied PII redaction to clinical notes")
-        
+
         optimize_memory()
         
         # Prepare data
@@ -667,10 +638,5 @@ class MedDialogue:
                 "typo_ratio": self.conversation_config.typo_ratio,
                 "validation_split": self.conversation_config.validation_split,
                 "has_validation": self.conversation_config.validation_split > 0
-            },
-            "safety": {
-                "enabled": self.enable_safety,
-                "pii_detection": self.safety_config.enable_pii_detection if self.enable_safety else False,
-                "bias_monitoring": self.safety_config.enable_bias_monitoring if self.enable_safety else False
             }
         }

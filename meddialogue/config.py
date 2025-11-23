@@ -28,14 +28,7 @@ class OutputFormat(Enum):
 
 
 class PIISensitivity(Enum):
-    """
-    PII detection sensitivity levels.
-    
-    - LOW: Detect only obvious PII (SSN, phone, email)
-    - MEDIUM: Add addresses and medical record numbers
-    - HIGH: Add names, DOB, and age references (recommended for healthcare)
-    - MAXIMUM: Strictest detection including indirect identifiers
-    """
+    """PII detection sensitivity levels (stub for backward compatibility)."""
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"
@@ -45,44 +38,20 @@ class PIISensitivity(Enum):
 @dataclass
 class SafetyConfig:
     """
-    Configuration for safety guardrails and validation.
-    
-    Safety checks are critical in healthcare AI to prevent:
-    - PII exposure in training data
-    - Demographic bias in model predictions
-    - Invalid medical terminology or codes
-    
-    Attributes:
-        enable_pii_detection: Enable PII detection in clinical text
-        pii_sensitivity: Sensitivity level for PII detection (HIGH recommended for healthcare)
-        enable_bias_monitoring: Monitor for demographic imbalances (e.g., age, gender, race)
-        enable_clinical_validation: Validate medical terminology and diagnostic codes
-        max_pii_threshold: Maximum allowed PII confidence score (0-1)
-        bias_demographic_fields: Fields to monitor for bias (default: age, gender, race, ethnicity)
-        require_icd_validation: Validate ICD-10 codes (set False if using legacy ICD-9 or other systems)
-        block_on_safety_failure: Block processing if safety checks fail (recommended: True for production)
-        log_safety_events: Log all safety-related events for audit trails
-        custom_medical_terms: Task-specific medical terms to validate (extends defaults)
-        custom_pii_patterns: Custom regex patterns for PII detection (extends defaults)
+    Configuration for safety guardrails (stub for backward compatibility).
+
+    Safety checks have been removed. This stub maintains API compatibility.
     """
-    enable_pii_detection: bool = True
-    pii_sensitivity: PIISensitivity = PIISensitivity.HIGH
-    enable_bias_monitoring: bool = True
-    enable_clinical_validation: bool = True
-    max_pii_threshold: float = 0.9
-    bias_demographic_fields: List[str] = field(default_factory=lambda: ["age", "gender", "race", "ethnicity"])
+    enable_pii_detection: bool = False
+    pii_sensitivity: PIISensitivity = PIISensitivity.LOW
+    enable_bias_monitoring: bool = False
+    enable_clinical_validation: bool = False
+    max_pii_threshold: float = 1.0
+    bias_demographic_fields: List[str] = field(default_factory=list)
     require_icd_validation: bool = False
-    block_on_safety_failure: bool = True
-    log_safety_events: bool = True
-    
-    pii_patterns: Dict[str, str] = field(default_factory=lambda: {
-        "ssn": r"\b\d{3}-\d{2}-\d{4}\b",
-        "phone": r"\b\d{3}[-.]?\d{3}[-.]?\d{4}\b",
-        "email": r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b",
-        "mrn": r"\b(MRN|mrn|medical record)[\s:]*[\d-]+\b",
-        "dob": r"\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b"
-    })
-    
+    block_on_safety_failure: bool = False
+    log_safety_events: bool = False
+    pii_patterns: Dict[str, str] = field(default_factory=dict)
     custom_medical_terms: List[str] = field(default_factory=list)
     custom_pii_patterns: Dict[str, str] = field(default_factory=dict)
 

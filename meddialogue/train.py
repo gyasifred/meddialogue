@@ -613,13 +613,6 @@ class Trainer:
                 "bf16": self.training_config.bf16,
                 "use_full_dataset": self.training_config.use_full_dataset
             },
-            "safety": {
-                "pii_detection": self.safety_config.enable_pii_detection,
-                "pii_sensitivity": self.safety_config.pii_sensitivity.value,
-                "bias_monitoring": self.safety_config.enable_bias_monitoring,
-                "clinical_validation": self.safety_config.enable_clinical_validation,
-                "block_on_failure": self.safety_config.block_on_safety_failure
-            },
             "notes": {
                 "data_mapping": "1:1 row to example (v1.0.0)",
                 "no_artificial_multiplication": True,

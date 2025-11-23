@@ -14,7 +14,6 @@ Key Features (v1.0.0):
 - Semantic variation across questions
 - Format teaching (TEXT, JSON, XML, Markdown)
 - Multi-turn conversations with context preservation
-- Comprehensive safety checks (PII detection, bias monitoring)
 - LoRA efficient fine-tuning
 
 Author: Frederick Gyasi (gyasi@musc.edu)
@@ -160,7 +159,6 @@ def get_version_info():
             "Optional validation split",
             "LoRA efficient fine-tuning",
             "Multi-format support (TEXT, JSON, XML, Markdown)",
-            "Safety checks (PII, bias, clinical validation)",
             "Multi-turn conversations"
         ],
         "changelog_v1.0.0": [
