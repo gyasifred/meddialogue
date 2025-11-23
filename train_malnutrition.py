@@ -74,8 +74,7 @@ class MalnutritionTaskConfig:
     10. Social Context - Barriers and interventions
     11. Clinical Insights - Teaching and prognosis
     """
-    
-     QUESTION_TEMPLATES = {
+  QUESTION_TEMPLATES = {
         'case_presentation': [
             # 1. Assessment framing with temporal context
             "Document the clinical presentation including chief concern, temporal context, and assessment type (single-point vs serial/longitudinal). What additional history would strengthen the assessment?",
