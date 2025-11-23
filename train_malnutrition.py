@@ -37,8 +37,7 @@ from meddialogue import (
     SafetyConfig,
     TrainingConfig,
     ConversationConfig,
-    OutputFormat,
-    PIISensitivity
+    OutputFormat
 )
 
 logging.basicConfig(
@@ -386,29 +385,15 @@ class MalnutritionTaskConfig:
         )
 
 
-# [Helper functions remain the same]
+# [Helper functions]
 def create_safety_config(
-    enable_pii: bool = True,
-    enable_bias: bool = True,
-    enable_validation: bool = True,
+    enable_pii: bool = False,
+    enable_bias: bool = False,
+    enable_validation: bool = False,
     block_on_failure: bool = False
 ) -> SafetyConfig:
-    """Create safety configuration with medical terminology validation."""
-    return SafetyConfig(
-        enable_pii_detection=enable_pii,
-        pii_sensitivity=PIISensitivity.HIGH,
-        enable_bias_monitoring=enable_bias,
-        enable_clinical_validation=enable_validation,
-        max_pii_threshold=0.95,
-        bias_demographic_fields=["age", "gender", "race", "ethnicity"],
-        require_icd_validation=False,
-        block_on_safety_failure=block_on_failure,
-        log_safety_events=True,
-        custom_medical_terms=sum(
-            MalnutritionTaskConfig.MEDICAL_TERMINOLOGY.values(),
-            []
-        )
-    )
+    """Create safety configuration (stub - safety features removed)."""
+    return SafetyConfig()
 
 
 def create_training_config(
@@ -702,17 +687,9 @@ NEW in v1.0.0:
     parser.add_argument("--max_multi_turns", type=int, default=15,
                        help="Max conversation turns (default: 12)")
     
-    # Safety and testing
+    # Testing options
     parser.add_argument("--quick_test", action="store_true",
                        help="Quick test (100 examples)")
-    parser.add_argument("--disable_safety", action="store_true",
-                       help="Disable safety checks")
-    parser.add_argument("--disable_pii", action="store_true",
-                       help="Disable PII detection")
-    parser.add_argument("--disable_bias", action="store_true",
-                       help="Disable bias monitoring")
-    parser.add_argument("--block_on_safety", action="store_true",
-                       help="Block if safety fails")
     parser.add_argument("--disable_typos", action="store_true",
                        help="Disable typo injection")
     
@@ -789,13 +766,8 @@ NEW in v1.0.0:
     logger.info(f"  Field ordering: Reasoning (priority 2) before Status (priority 3)")
     logger.info(f"  Question templates: 110 total (10 per field)")
     
-    safety_config = create_safety_config(
-        enable_pii=not args.disable_pii,
-        enable_bias=not args.disable_bias,
-        enable_validation=not args.disable_safety,
-        block_on_failure=args.block_on_safety
-    )
-    logger.info(f"✓ Safety config created")
+    safety_config = create_safety_config()
+    logger.info(f"✓ Safety config created (stub)")
     
     training_config = create_training_config(
         epochs=args.epochs,
@@ -836,7 +808,6 @@ NEW in v1.0.0:
                 training_config=training_config,
                 conversation_config=conversation_config,
                 output_dir=os.path.join(args.output, model_type),
-                enable_safety=not args.disable_safety,
                 cuda_device=args.cuda_device,
                 verbose=True
             )

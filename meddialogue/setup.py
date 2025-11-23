@@ -98,10 +98,7 @@ setup(
         "llm",
         "transformers",
         "lora",
-        "patient-safety",
-        "data-multiplication",
-        "pii-detection",
-        "bias-monitoring",
+        "data-preparation",
         "medical-terminology",
     ],
 )

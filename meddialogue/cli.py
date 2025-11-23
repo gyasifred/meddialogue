@@ -72,11 +72,6 @@ Note: v1.0.0 uses 1:1 row-to-example mapping (no artificial multiplication)
     parser.add_argument("--max_multi_turns", type=int, default=10, 
                        help="Max multi-turn conversation turns (default: 10)")
     
-    # Safety arguments
-    parser.add_argument("--disable_safety", action="store_true", help="Disable safety checks")
-    parser.add_argument("--disable_pii", action="store_true", help="Disable PII detection")
-    parser.add_argument("--disable_bias", action="store_true", help="Disable bias monitoring")
-    
     # Other arguments
     parser.add_argument("--cuda_device", type=int, default=0, help="CUDA device (default: 0)")
     parser.add_argument("--quick_test", action="store_true", help="Quick test with subsampled data")
@@ -126,11 +121,7 @@ Note: v1.0.0 uses 1:1 row-to-example mapping (no artificial multiplication)
         task_description=f"{args.task} clinical assessment"
     )
     
-    safety_config = SafetyConfig(
-        enable_pii_detection=not args.disable_pii,
-        enable_bias_monitoring=not args.disable_bias,
-        block_on_safety_failure=False
-    )
+    safety_config = SafetyConfig()
     
     training_config = TrainingConfig(
         num_epochs=args.epochs,
@@ -156,7 +147,6 @@ Note: v1.0.0 uses 1:1 row-to-example mapping (no artificial multiplication)
         training_config=training_config,
         conversation_config=conversation_config,
         output_dir=args.output,
-        enable_safety=not args.disable_safety,
         cuda_device=args.cuda_device
     )
     
