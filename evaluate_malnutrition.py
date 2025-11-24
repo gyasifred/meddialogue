@@ -1,13 +1,24 @@
 #!/usr/bin/env python3
 """
-Malnutrition Model Evaluation Script - v3.1.1 (Fixed Single-Turn JSON)
-=============================================================================
-Evaluates trained MedDialogue malnutrition models on test datasets.
+Malnutrition Model Evaluation Script - v4.0.0 (Multi-Turn Conversation)
+==========================================================================
+Evaluates trained MedDialogue malnutrition models using multi-turn conversation
+pattern similar to gradio_chat_v1.py.
+
+Key Features:
+  - Multi-turn conversation per patient (maintains history within sample)
+  - Clean conversation reset between patients (no history leakage)
+  - Clinical note included ONLY in first message
+  - Questions asked in training order
+  - Last question is malnutrition status
+  - Only model responses returned (no clinical text spillage)
+  - Comprehensive classification metrics
 
 Author: Frederick Gyasi (gyasi@musc.edu)
 Institution: Medical University of South Carolina, Biomedical Informatics Center
-Version: 3.1.1 - Fixed JSON extraction and tuple handling
+Version: 4.0.0
 """
+
 import os
 import sys
 import logging
@@ -15,27 +26,30 @@ import argparse
 import json
 import re
 import gc
+import torch
 from typing import Dict, List, Any, Optional, Tuple
 from datetime import datetime
 from pathlib import Path
 import pandas as pd
 import numpy as np
-import torch
 from tqdm import tqdm
 
 # Metrics
 from sklearn.metrics import (
     accuracy_score, precision_recall_fscore_support,
     confusion_matrix, classification_report,
-    matthews_corrcoef, roc_auc_score, roc_curve
+    matthews_corrcoef, roc_auc_score
 )
 
-# MedDialogue imports
-from meddialogue import MedDialogue, TaskConfig
-from meddialogue.models import load_model, ModelConfig
-from meddialogue.config import OutputFormat
-from meddialogue.inference import InferencePipeline
+# Unsloth imports
+try:
+    from unsloth import FastLanguageModel
+    from unsloth.chat_templates import get_chat_template
+except ImportError:
+    print("Error: unsloth not installed. Install with: pip install unsloth")
+    sys.exit(1)
 
+# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -44,25 +58,39 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+# =================================================================
+# Evaluation Questions (from training templates)
+# =================================================================
+
+EVALUATION_QUESTIONS = [
+    "What are ALL anthropometric measurements with DATES? Calculate trends and trajectories.",
+    "What's your diagnosis with complete clinical reasoning? Synthesize ALL evidence temporally.",
+    "Is malnutrition present or absent? State 'Malnutrition Present' or 'Malnutrition Absent'."
+]
+
+
+# =================================================================
+# Multi-Turn Conversation Evaluator
+# =================================================================
+
 class MalnutritionEvaluator:
     """
-    Evaluator for malnutrition classification models with single-turn JSON evaluation.
-    
-    Fixed Issues:
-    - Tuple handling in JSON extraction
-    - Robust status extraction from nested structures
-    - Proper string conversion before processing
+    Evaluator using multi-turn conversation pattern.
+
+    Key behaviors:
+    - Maintains conversation history WITHIN each patient evaluation
+    - Resets conversation history BETWEEN patients (no leakage)
+    - Clinical note included ONLY in first message
+    - Processes questions in order, last one is malnutrition status
     """
 
-    # Patterns to extract malnutrition status from responses (fallback if JSON fails)
+    # Patterns to extract malnutrition status from final response
     PRESENT_PATTERNS = [
         r'\bmalnutrition\s+(is\s+)?present\b',
         r'\byes\b.*\bmalnutrition\b',
         r'\bmalnutrition\s+confirmed\b',
         r'\bmalnourished\b',
-        r'\bdiagnosis:?\s+malnutrition\b',
-        r'\bmalnutrition_status:?\s+(present|yes|1|true)\b',
-        r'\b(present|positive)\b.*\bmalnutrition\b'
+        r'\bdiagnosis:?\s+malnutrition\b'
     ]
 
     ABSENT_PATTERNS = [
@@ -70,335 +98,279 @@ class MalnutritionEvaluator:
         r'\bno\b.*\bmalnutrition\b',
         r'\bnot\s+malnourished\b',
         r'\bno\s+evidence\s+of\s+malnutrition\b',
-        r'\bdoes\s+not\s+meet\s+criteria\b',
-        r'\bmalnutrition_status:?\s+(absent|no|0|false)\b',
-        r'\b(absent|negative)\b.*\bmalnutrition\b'
+        r'\bdoes\s+not\s+meet\s+criteria\b'
     ]
 
     def __init__(
         self,
         model_path: str,
         model_type: str = "llama",
+        chat_template: str = None,
         temperature: float = 0.1,
+        max_seq_length: int = 4096,
         max_new_tokens: int = 1024,
         cuda_device: Optional[int] = None
     ):
+        """Initialize evaluator with model configuration."""
         self.model_path = model_path
         self.model_type = model_type
+        self.chat_template = chat_template
         self.temperature = temperature
+        self.max_seq_length = max_seq_length
         self.max_new_tokens = max_new_tokens
         self.cuda_device = cuda_device
 
         self.model = None
         self.tokenizer = None
-        self.device = None
-        self.inference_pipeline = None
+        self.device = self._get_device()
 
-        # Task configuration for malnutrition (simplified - no question templates)
-        self.task_config = TaskConfig(
-            task_name="pediatric_malnutrition_evaluation",
-            task_description="Evaluate malnutrition status with clinical reasoning",
-            input_field="txt",
-            output_fields=["malnutrition_status"],
-            output_formats=[OutputFormat.JSON, OutputFormat.TEXT]
-        )
+        # Conversation history for current patient (reset between patients)
+        self.current_conversation: List[Dict[str, str]] = []
+        self.clinical_note_included = False
 
-        logger.info(f"Evaluator initialized for {model_type} (Fixed Single-Turn JSON v3.1.1)")
+        logger.info(f"Evaluator initialized: {model_type}")
         logger.info(f"Model path: {model_path}")
         logger.info(f"Temperature: {temperature}")
-        logger.info(f"Max tokens: {max_new_tokens}")
-
-    def load_model(self, max_seq_length: int = 16384):
-        """Load trained model for inference."""
-        logger.info("="*80)
-        logger.info("Loading model for evaluation...")
-        logger.info("="*80)
-
-        # Device
-        if self.cuda_device is not None:
-            os.environ["CUDA_VISIBLE_DEVICES"] = str(self.cuda_device)
-            self.device = torch.device("cuda:0")
-        elif torch.cuda.is_available():
-            self.device = torch.device("cuda")
-        else:
-            self.device = torch.device("cpu")
         logger.info(f"Device: {self.device}")
 
-        # Model registry
-        from meddialogue.models import ModelRegistry
-        try:
-            model_info = ModelRegistry.get_config(self.model_type)
-        except KeyError:
-            available = ModelRegistry.list_models()
-            raise ValueError(f"Unknown model type: {self.model_type}. Available: {available}")
+    def _get_device(self) -> torch.device:
+        """Get optimal CUDA device."""
+        if not torch.cuda.is_available():
+            logger.info("CUDA not available - using CPU")
+            return torch.device("cpu")
 
-        model_config = ModelConfig(
-            model_name=self.model_path,
-            model_type=self.model_type,
-            chat_template=model_info["chat_template"],
-            max_seq_length=max_seq_length
-        )
+        if self.cuda_device is not None:
+            device = torch.device(f"cuda:{self.cuda_device}")
+            logger.info(f"Using specified GPU {self.cuda_device}")
+            return device
 
-        logger.info(f"Loading from: {self.model_path}")
-        self.model, self.tokenizer = load_model(model_config, max_seq_length)
+        device = torch.device("cuda:0")
+        logger.info(f"Using GPU: {torch.cuda.get_device_name(0)}")
+        return device
 
-        # Handle quantized models
-        is_quantized = getattr(self.model, "is_loaded_in_8bit", False) or \
-                       getattr(self.model, "is_loaded_in_4bit", False)
-
-        if not is_quantized:
-            self.model.to(self.device)
-        else:
-            logger.info("Quantized model (8-bit/4-bit) – skipping .to()")
-
-        self.model.eval()
-        logger.info("Model loaded successfully")
-
-        # Initialize inference pipeline
-        self.inference_pipeline = InferencePipeline(
-            model=self.model,
-            tokenizer=self.tokenizer,
-            task_config=self.task_config,
-            max_new_tokens=self.max_new_tokens,
-            temperature=self.temperature,
-            device=self.device
-        )
-        logger.info("Inference pipeline initialized")
+    def load_model(self):
+        """Load model and tokenizer."""
+        logger.info("="*80)
+        logger.info("Loading model...")
         logger.info("="*80)
 
-    def infer_single(self, clinical_note: str) -> Tuple[str, int, float]:
-        """
-        Run inference on single clinical note using single-turn evaluation.
-        
-        Args:
-            clinical_note: Clinical text
-            
-        Returns:
-            Tuple of (combined_response, predicted_label, confidence)
-        """
-        print("\n" + "="*80)
-        print("SINGLE-TURN EVALUATION")
-        print("="*80)
-
-        # Complete evaluation question (no template)
-        evaluation_question = (
-            "Analyze this clinical note and provide a comprehensive malnutrition assessment:\n\n"
-            "1. Summarize the presenting problem with timeline of events. What is the family's primary concern and how has it evolved over time?\n\n"
-            "2. Extract all anthropometric measurements with dates: weight, height/length, BMI, MUAC, head circumference. Calculate z-scores and percentiles using appropriate growth references (WHO 0-2y, CDC 2-20y).\n\n"
-            "3. Extract all nutrition-relevant laboratory values with dates: visceral proteins (albumin, prealbumin, total protein), CMP, CBC, micronutrients (25-OH vitamin D, iron studies, zinc, folate, B12), inflammatory markers (CRP, ESR). Document reference ranges and units.\n\n"
-            "4. Provide your clinical diagnosis with complete reasoning. Synthesize ALL evidence temporally.\n\n"
-            "5. State the final malnutrition classification clearly as either 'Malnutrition Present' or 'Malnutrition Absent'.\n\n"
-            "Return your response in JSON format with the following fields: growth_assessment, lab_findings, diagnosis_reasoning, malnutrition_status."
-        )
-
-        print(f"\nQ: {evaluation_question[:200]}...\n")
-        print("=" * 80)
-        print("Running single-turn inference...\n")
-
-        # Use single-turn inference
-        response = self.inference_pipeline.infer(
-            clinical_note=clinical_note,
-            question=evaluation_question,
-            output_format=OutputFormat.JSON,
-            return_full_response=False
-        )
-
-        # Convert response to string - FIXED: handle all response types
-        response_str = self._safe_response_to_string(response)
-        json_response = self._extract_json_response(response_str)
-
-        print(f"RESPONSE:\n{response_str[:500]}...\n")
-        print("JSON OUTPUT:")
-        print(json.dumps(json_response, indent=2))
-        print("="*80 + "\n")
-
-        # Parse classification from JSON
-        predicted_label, confidence = self._parse_from_json_or_fallback(
-            json_response, response_str
-        )
-
-        return response_str, predicted_label, confidence
-
-    def _safe_response_to_string(self, response: Any) -> str:
-        """
-        Safely convert any response type to string.
-        
-        FIXED: Handles dict, tuple, list, and other types properly.
-        """
-        if isinstance(response, str):
-            return response
-        elif isinstance(response, dict):
-            return json.dumps(response)
-        elif isinstance(response, (tuple, list)):
-            # If tuple/list, try to extract the actual response
-            if len(response) > 0:
-                first_item = response[0]
-                if isinstance(first_item, str):
-                    return first_item
-                elif isinstance(first_item, dict):
-                    return json.dumps(first_item)
-            # Fallback: convert entire structure to JSON
-            return json.dumps(response)
-        else:
-            # For any other type, convert to string
-            return str(response)
-
-    def _extract_json_response(self, response: str) -> Dict:
-        """
-        Extract JSON from response with robust handling.
-        
-        FIXED: Better nested structure handling and status extraction.
-        """
-        def extract_status_from_text(text: str) -> Optional[str]:
-            """Extract malnutrition status from plain text."""
-            if not text:
-                return None
-            text_lower = text.lower()
-            
-            # Check for explicit status statements
-            if "malnutrition present" in text_lower or "malnutrition is present" in text_lower:
-                return "Malnutrition Present"
-            elif "malnutrition absent" in text_lower or "malnutrition is absent" in text_lower:
-                return "Malnutrition Absent"
-            elif "no malnutrition" in text_lower or "not malnourished" in text_lower:
-                return "Malnutrition Absent"
-            
-            # Check for yes/no responses
-            malnutrition_match = re.search(r'malnutrition[:\s]+(\w+)', text_lower)
-            if malnutrition_match:
-                answer = malnutrition_match.group(1)
-                if answer in ['yes', 'present', 'positive', 'true', '1']:
-                    return "Malnutrition Present"
-                elif answer in ['no', 'absent', 'negative', 'false', '0']:
-                    return "Malnutrition Absent"
-            
-            return None
-
-        def extract_status_from_dict(data: Dict) -> Optional[str]:
-            """Recursively extract malnutrition status from dict."""
-            # Direct field check
-            for key in ['malnutrition_status', 'status', 'classification', 'diagnosis']:
-                if key in data:
-                    value = data[key]
-                    if isinstance(value, str):
-                        status = extract_status_from_text(value)
-                        if status:
-                            return status
-            
-            # Check all string values
-            for value in data.values():
-                if isinstance(value, str):
-                    status = extract_status_from_text(value)
-                    if status:
-                        return status
-                elif isinstance(value, dict):
-                    status = extract_status_from_dict(value)
-                    if status:
-                        return status
-            
-            return None
-
-        def extract_json_from_text(text: str) -> Optional[Dict]:
-            """Extract JSON object from text using brace matching."""
-            start_idx = text.find('{')
-            if start_idx == -1:
-                return None
-
-            brace_count = 0
-            for i, char in enumerate(text[start_idx:], start_idx):
-                if char == '{':
-                    brace_count += 1
-                elif char == '}':
-                    brace_count -= 1
-                    if brace_count == 0:
-                        json_str = text[start_idx:i+1]
-                        try:
-                            return json.loads(json_str)
-                        except json.JSONDecodeError:
-                            continue
-            return None
-
-        # Strategy 1: Parse entire response as JSON
         try:
-            parsed = json.loads(response.strip())
-            if isinstance(parsed, dict):
-                status = extract_status_from_dict(parsed)
-                if status:
-                    parsed['malnutrition_status'] = status
-                return parsed
-        except json.JSONDecodeError:
-            pass
+            if self.device.type == 'cuda':
+                torch.cuda.empty_cache()
 
-        # Strategy 2: Extract first JSON object
-        parsed = extract_json_from_text(response)
-        if parsed and isinstance(parsed, dict):
-            status = extract_status_from_dict(parsed)
-            if status:
-                parsed['malnutrition_status'] = status
-            return parsed
+            # Load model with Unsloth
+            self.model, self.tokenizer = FastLanguageModel.from_pretrained(
+                model_name=self.model_path,
+                max_seq_length=self.max_seq_length,
+                dtype=None,
+                load_in_4bit=True,
+                device_map={"": self.device.index if self.device.type == 'cuda' else 'cpu'},
+                trust_remote_code=True,
+                token=os.environ.get("HF_TOKEN")
+            )
 
-        # Strategy 3: Extract from plain text
-        status = extract_status_from_text(response)
-        if status:
-            return {"malnutrition_status": status}
+            # Set chat template
+            if self.chat_template:
+                template = self.chat_template
+            else:
+                template_map = {
+                    "llama": "llama-3.1",
+                    "phi": "phi-3",
+                    "phi-4": "phi-4",
+                    "mistral": "mistral",
+                    "qwen": "qwen2.5"
+                }
+                template = template_map.get(self.model_type, "llama-3.1")
 
-        # Fallback: return default
-        logger.warning(f"Could not extract valid JSON or status from response: {response[:300]}")
-        return {"malnutrition_status": "Malnutrition Absent", "parsing_failed": True}
+            self.tokenizer = get_chat_template(
+                tokenizer=self.tokenizer,
+                chat_template=template
+            )
 
-    def _parse_from_json_or_fallback(self, json_obj: Dict, raw_response: str) -> Tuple[int, float]:
+            # Set to inference mode
+            FastLanguageModel.for_inference(self.model)
+
+            logger.info("✓ Model loaded successfully")
+
+            if self.device.type == 'cuda':
+                allocated = torch.cuda.memory_allocated(self.device) / 1024**3
+                logger.info(f"GPU Memory: {allocated:.2f}GB allocated")
+
+        except Exception as e:
+            logger.error(f"Failed to load model: {e}", exc_info=True)
+            raise RuntimeError(f"Model loading failed: {e}")
+
+    def reset_conversation(self):
+        """Reset conversation history for new patient."""
+        self.current_conversation = []
+        self.clinical_note_included = False
+        logger.debug("Conversation reset")
+
+    def generate_response(self, user_message: str, clinical_note: str = None) -> str:
         """
-        Parse label from JSON, fallback to regex if invalid.
-        
-        FIXED: Better confidence scoring and status detection.
-        """
-        # Check if parsing failed
-        parsing_failed = json_obj.get("parsing_failed", False)
-        
-        # Get status from JSON
-        status = json_obj.get("malnutrition_status", "")
-        
-        if not status or parsing_failed:
-            # Fallback to regex
-            logger.warning("Using regex fallback for classification")
-            return self._parse_classification(raw_response)
+        Generate response to user message.
 
-        # Convert to string and check
-        status_str = str(status).lower().strip()
-
-        # Check for various status formats
-        if "present" in status_str and "absent" not in status_str:
-            return 1, 0.95
-        elif "absent" in status_str or "no malnutrition" in status_str:
-            return 0, 0.95
-        elif status_str in ["yes", "1", "true", "positive"]:
-            return 1, 0.90
-        elif status_str in ["no", "0", "false", "negative"]:
-            return 0, 0.90
-        else:
-            # Fallback to regex
-            logger.warning(f"Ambiguous status: {status_str}, using regex fallback")
-            return self._parse_classification(raw_response)
-
-    def _parse_classification(self, response: str) -> Tuple[int, float]:
+        Clinical note is included ONLY in first message if provided.
+        Maintains full conversation history for multi-turn context.
         """
-        Legacy regex parser (fallback only).
-        
-        FIXED: Better confidence calculation.
+        # Include clinical note in FIRST message only
+        actual_message = user_message
+        if clinical_note and not self.clinical_note_included:
+            actual_message = f"CLINICAL NOTE:\n{clinical_note.strip()}\n\n{user_message}"
+            self.clinical_note_included = True
+            logger.debug("Clinical note included in first message")
+
+        # Add user message to conversation history
+        self.current_conversation.append({"role": "user", "content": actual_message})
+
+        try:
+            # Apply chat template to full conversation history
+            formatted_text = self.tokenizer.apply_chat_template(
+                self.current_conversation,
+                tokenize=False,
+                add_generation_prompt=True
+            )
+
+            # Tokenize with truncation
+            max_input_length = self.max_seq_length - self.max_new_tokens
+            inputs = self.tokenizer(
+                formatted_text,
+                return_tensors="pt",
+                truncation=True,
+                max_length=max_input_length
+            )
+
+            inputs = {k: v.to(self.device) for k, v in inputs.items()}
+
+            # Generate response
+            with torch.no_grad():
+                outputs = self.model.generate(
+                    **inputs,
+                    max_new_tokens=self.max_new_tokens,
+                    temperature=self.temperature,
+                    do_sample=True if self.temperature > 0 else False,
+                    pad_token_id=self.tokenizer.eos_token_id,
+                    eos_token_id=self.tokenizer.eos_token_id,
+                    repetition_penalty=1.1,
+                    top_p=0.95,
+                    use_cache=True
+                )
+
+            # Decode only the new tokens (not the input)
+            response = self.tokenizer.decode(
+                outputs[0][inputs['input_ids'].shape[1]:],
+                skip_special_tokens=True
+            )
+
+            # Clean up tensors
+            del inputs
+            del outputs
+
+            # Add assistant response to conversation history
+            self.current_conversation.append({"role": "assistant", "content": response})
+
+            return response
+
+        except Exception as e:
+            error_msg = f"Error generating response: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            return error_msg
+
+    def evaluate_single_patient(
+        self,
+        clinical_note: str,
+        patient_id: str = None
+    ) -> Tuple[str, int, float, List[str]]:
         """
+        Evaluate single patient using multi-turn conversation.
+
+        Returns:
+            Tuple of (final_response, predicted_label, confidence, all_responses)
+        """
+        # Reset conversation for this patient
+        self.reset_conversation()
+
+        all_responses = []
+
+        print(f"\n{'='*80}")
+        print(f"EVALUATING PATIENT: {patient_id}")
+        print(f"{'='*80}")
+        print(f"Clinical Note Length: {len(clinical_note)} characters")
+        print(f"{'='*80}\n")
+
+        # Ask questions in order
+        for i, question in enumerate(EVALUATION_QUESTIONS, 1):
+            print(f"\n{'='*80}")
+            print(f"TURN {i}/{len(EVALUATION_QUESTIONS)}")
+            print(f"{'='*80}")
+
+            # Show what's being passed
+            if i == 1:
+                print(f"\n📝 INPUT TO MODEL (Turn {i}):")
+                print(f"{'='*80}")
+                print(f"CLINICAL NOTE (first {500} chars):")
+                print(f"{'-'*80}")
+                print(clinical_note[:500] + "..." if len(clinical_note) > 500 else clinical_note)
+                print(f"{'-'*80}")
+                print(f"\nQUESTION {i}:")
+                print(f"{question}")
+                print(f"{'='*80}")
+                print(f"\n⚠️ NOTE: Clinical note is included ONLY in this first message")
+                print(f"⚠️ Conversation history: 0 previous turns")
+            else:
+                print(f"\n📝 INPUT TO MODEL (Turn {i}):")
+                print(f"{'='*80}")
+                print(f"QUESTION {i}:")
+                print(f"{question}")
+                print(f"{'='*80}")
+                print(f"\n⚠️ NOTE: NO clinical note (already sent in Turn 1)")
+                print(f"⚠️ Conversation history: {len(self.current_conversation)//2} previous turns")
+                print(f"⚠️ Model sees ALL previous questions and answers")
+
+            # Include clinical note only in first message
+            clinical_note_to_pass = clinical_note if i == 1 else None
+
+            print(f"\n⏳ Generating response...")
+            response = self.generate_response(question, clinical_note_to_pass)
+            all_responses.append(response)
+
+            print(f"\n✅ RESPONSE {i}:")
+            print(f"{'='*80}")
+            print(response)
+            print(f"{'='*80}\n")
+
+        # Extract malnutrition status from final response
+        final_response = all_responses[-1]
+        predicted_label, confidence = self._parse_malnutrition_status(final_response)
+
+        logger.info(f"\nPredicted: {'Present' if predicted_label == 1 else 'Absent'} (confidence: {confidence:.2f})")
+        logger.info(f"{'='*80}\n")
+
+        return final_response, predicted_label, confidence, all_responses
+
+    def _parse_malnutrition_status(self, response: str) -> Tuple[int, float]:
+        """Parse malnutrition status from response."""
         response_lower = response.lower()
-        present_score = sum(1 for pattern in self.PRESENT_PATTERNS if re.search(pattern, response_lower))
-        absent_score = sum(1 for pattern in self.ABSENT_PATTERNS if re.search(pattern, response_lower))
+
+        # Count pattern matches
+        present_score = sum(1 for pattern in self.PRESENT_PATTERNS
+                          if re.search(pattern, response_lower))
+        absent_score = sum(1 for pattern in self.ABSENT_PATTERNS
+                         if re.search(pattern, response_lower))
 
         if present_score > absent_score:
-            confidence = min(0.85, 0.5 + 0.1 * present_score)
-            return 1, confidence
+            return 1, min(0.95, 0.5 + 0.1 * present_score)
         elif absent_score > present_score:
-            confidence = min(0.85, 0.5 + 0.1 * absent_score)
-            return 0, confidence
+            return 0, min(0.95, 0.5 + 0.1 * absent_score)
         else:
-            logger.warning(f"Ambiguous response (equal scores): {response[:200]}")
-            return 0, 0.5
+            # Check for explicit "present" or "absent"
+            if "present" in response_lower and "absent" not in response_lower:
+                return 1, 0.85
+            elif "absent" in response_lower:
+                return 0, 0.85
+            else:
+                logger.warning(f"Ambiguous response: {response[:100]}")
+                return 0, 0.5
 
     def evaluate_dataset(
         self,
@@ -406,14 +378,15 @@ class MalnutritionEvaluator:
         output_dir: str,
         save_predictions: bool = True
     ) -> Dict[str, Any]:
-        """Evaluate model on test dataset using single-turn JSON evaluation."""
+        """Evaluate model on test dataset."""
         logger.info("="*80)
-        logger.info("EVALUATION STARTING (FIXED SINGLE-TURN JSON)")
+        logger.info("EVALUATION STARTING (MULTI-TURN CONVERSATION)")
         logger.info("="*80)
         logger.info(f"Test CSV: {test_csv}")
         logger.info(f"Output dir: {output_dir}")
         logger.info("="*80)
 
+        # Load test data
         df = pd.read_csv(test_csv)
         required_cols = ["txt", "DEID", "label"]
         missing = [col for col in required_cols if col not in df.columns]
@@ -427,23 +400,27 @@ class MalnutritionEvaluator:
         logger.info(f"  Present (1): {label_counts.get(1, 0)}")
         logger.info("-"*80)
 
+        # Evaluate each patient
         predictions = []
         confidences = []
-        responses = []
-        json_outputs = []
+        final_responses = []
+        all_responses_list = []
 
-        logger.info("Running inference on test set...")
+        logger.info("Running multi-turn evaluation on test set...")
         for idx, row in tqdm(df.iterrows(), total=len(df), desc="Evaluating"):
             try:
-                response, pred, conf = self.infer_single(row["txt"])
-                json_obj = self._extract_json_response(response)
-                
+                # CRITICAL: Each patient gets fresh conversation history
+                final_response, pred, conf, all_resp = self.evaluate_single_patient(
+                    clinical_note=row["txt"],
+                    patient_id=str(row["DEID"])
+                )
+
                 predictions.append(pred)
                 confidences.append(conf)
-                responses.append(response)
-                json_outputs.append(json_obj)
+                final_responses.append(final_response)
+                all_responses_list.append(all_resp)
 
-                # Memory cleanup every 10 samples
+                # Periodic garbage collection
                 if (idx + 1) % 10 == 0:
                     gc.collect()
                     if torch.cuda.is_available():
@@ -451,39 +428,41 @@ class MalnutritionEvaluator:
 
             except Exception as e:
                 logger.error(f"Error on row {idx} (DEID: {row['DEID']}): {e}")
-                import traceback
-                logger.error(traceback.format_exc())
-                
                 predictions.append(-1)
                 confidences.append(0.0)
-                responses.append(f"ERROR: {str(e)}")
-                json_outputs.append({"malnutrition_status": "ERROR", "error": str(e)})
+                final_responses.append(f"ERROR: {str(e)}")
+                all_responses_list.append([])
 
+        # Add results to dataframe
         df["predicted_label"] = predictions
         df["confidence"] = confidences
-        df["model_response"] = responses
-        df["json_output"] = [json.dumps(j) for j in json_outputs]
+        df["final_response"] = final_responses
+        df["all_responses"] = [json.dumps(resp) for resp in all_responses_list]
         df["correct"] = df["label"] == df["predicted_label"]
 
+        # Filter valid predictions
         valid_df = df[df["predicted_label"] != -1].copy()
         error_count = len(df) - len(valid_df)
 
         if error_count > 0:
-            logger.warning(f"Encountered {error_count} errors during inference")
+            logger.warning(f"Encountered {error_count} errors during evaluation")
 
-        logger.info(f"Completed inference on {len(valid_df)} valid examples")
+        logger.info(f"Completed evaluation on {len(valid_df)} valid examples")
 
-        # Final memory cleanup
+        # Final cleanup
         gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
+        logger.info("Final memory cleanup completed")
         logger.info("="*80)
 
+        # Calculate metrics
         metrics = self._calculate_metrics(
             valid_df["label"].tolist(),
             valid_df["predicted_label"].tolist()
         )
 
+        # Prepare results
         results = {
             "model_path": self.model_path,
             "model_type": self.model_type,
@@ -494,11 +473,13 @@ class MalnutritionEvaluator:
             "error_examples": error_count,
             "temperature": self.temperature,
             "max_new_tokens": self.max_new_tokens,
-            "version": "3.1.1 - Fixed JSON extraction",
-            "evaluation_method": "Single-turn inference with robust status extraction",
+            "evaluation_method": "Multi-turn conversation (gradio_chat pattern)",
+            "num_questions": len(EVALUATION_QUESTIONS),
+            "questions": EVALUATION_QUESTIONS,
             "metrics": metrics
         }
 
+        # Save results
         os.makedirs(output_dir, exist_ok=True)
 
         if save_predictions:
@@ -525,8 +506,7 @@ class MalnutritionEvaluator:
         cm = confusion_matrix(true_labels, predictions)
         tn, fp, fn, tp = cm.ravel() if cm.size == 4 else (0, 0, 0, 0)
         specificity = tn / (tn + fp) if (tn + fp) > 0 else 0
-        sensitivity = recall
-        
+
         try:
             auc = roc_auc_score(true_labels, predictions)
         except ValueError:
@@ -535,19 +515,13 @@ class MalnutritionEvaluator:
         precision_per_class, recall_per_class, f1_per_class, support_per_class = \
             precision_recall_fscore_support(true_labels, predictions, average=None, zero_division=0)
 
-        class_report = classification_report(
-            true_labels, predictions,
-            target_names=["Absent", "Present"],
-            output_dict=True, zero_division=0
-        )
-
         return {
             "overall": {
                 "accuracy": float(accuracy),
                 "precision": float(precision),
                 "recall": float(recall),
                 "f1_score": float(f1),
-                "sensitivity": float(sensitivity),
+                "sensitivity": float(recall),
                 "specificity": float(specificity),
                 "mcc": float(mcc),
                 "auc_roc": float(auc) if auc is not None else None
@@ -572,8 +546,7 @@ class MalnutritionEvaluator:
                     "f1_score": float(f1_per_class[1]),
                     "support": int(support_per_class[1])
                 }
-            },
-            "classification_report": class_report
+            }
         }
 
     def _save_summary_report(self, results: Dict[str, Any], df: pd.DataFrame, output_dir: str):
@@ -586,14 +559,19 @@ class MalnutritionEvaluator:
 
         with open(report_path, "w") as f:
             f.write("="*80 + "\n")
-            f.write("MALNUTRITION MODEL EVALUATION SUMMARY (FIXED v3.1.1)\n")
+            f.write("MALNUTRITION MODEL EVALUATION SUMMARY (MULTI-TURN)\n")
             f.write("="*80 + "\n\n")
             f.write(f"Model: {results['model_path']}\n")
             f.write(f"Model Type: {results['model_type']}\n")
             f.write(f"Test Data: {results['test_csv']}\n")
             f.write(f"Timestamp: {results['timestamp']}\n")
-            f.write(f"Version: {results['version']}\n")
-            f.write(f"Method: {results['evaluation_method']}\n")
+            f.write(f"Temperature: {results['temperature']}\n")
+            f.write(f"Evaluation Method: {results['evaluation_method']}\n")
+            f.write(f"Number of Questions: {results['num_questions']}\n")
+            f.write("\n" + "-"*80 + "\n\n")
+            f.write("QUESTIONS ASKED:\n")
+            for i, q in enumerate(results['questions'], 1):
+                f.write(f"  {i}. {q}\n")
             f.write("\n" + "-"*80 + "\n\n")
             f.write("DATASET STATISTICS:\n")
             f.write(f"  Total examples: {results['total_examples']}\n")
@@ -644,11 +622,12 @@ class MalnutritionEvaluator:
         cm = metrics["confusion_matrix"]
 
         print("\n" + "="*80)
-        print("EVALUATION RESULTS (FIXED v3.1.1)")
+        print("EVALUATION RESULTS (MULTI-TURN CONVERSATION)")
         print("="*80)
         print(f"\nModel: {results['model_path']}")
         print(f"Test examples: {results['valid_examples']}")
-        print(f"Errors: {results['error_examples']}")
+        print(f"Method: {results['evaluation_method']}")
+        print(f"Questions: {results['num_questions']}")
         print("\nOVERALL PERFORMANCE:")
         print(f"  Accuracy: {overall['accuracy']:.4f}")
         print(f"  Precision: {overall['precision']:.4f}")
@@ -665,30 +644,38 @@ class MalnutritionEvaluator:
         print(f"         Present {cm['false_negative']:4d}   {cm['true_positive']:4d}")
         print("="*80 + "\n")
 
+
+# =================================================================
+# Main Application Entry Point
+# =================================================================
+
 def main():
+    """Main application entry point."""
     parser = argparse.ArgumentParser(
-        description="Evaluate trained malnutrition model on test set (Single-Turn JSON v3.1.0)",
+        description="Evaluate malnutrition model using multi-turn conversation (v4.0.0)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Example usage:
   python evaluate_malnutrition.py \\
-    --model ./malnutrition_models_v1_1/llama/merged_llama_20241125_143022 \\
+    --model ./trained_model \\
     --csv test_data.csv \\
     --output ./eval_results
 
-Single-Turn JSON Evaluation:
-  - One comprehensive question requesting complete assessment
-  - Returns JSON with: growth_assessment, diagnosis_reasoning, malnutrition_status
-  - Avoids context accumulation issues from multi-turn conversations
-  - More efficient and reliable than multi-turn approach
+Multi-Turn Conversation Evaluation:
+  - Maintains conversation history within each patient
+  - Resets conversation between patients (no leakage)
+  - Clinical note included only in first message
+  - Questions asked in training order
+  - Last question is malnutrition status
         """
     )
 
     parser.add_argument("--model", required=True, help="Path to trained model")
     parser.add_argument("--csv", required=True, help="Path to test CSV")
     parser.add_argument("--output", default="./evaluation_results", help="Output directory")
-    parser.add_argument("--model_type", default="llama", choices=["llama", "phi-4", "mistral", "qwen"])
-    parser.add_argument("--max_seq_length", type=int, default=16384)
+    parser.add_argument("--model_type", default="llama", choices=["llama", "phi", "phi-4", "mistral", "qwen"])
+    parser.add_argument("--chat_template", help="Custom chat template")
+    parser.add_argument("--max_seq_length", type=int, default=4096)
     parser.add_argument("--temperature", type=float, default=0.1)
     parser.add_argument("--max_tokens", type=int, default=1024)
     parser.add_argument("--cuda_device", type=int, help="CUDA device index")
@@ -704,7 +691,7 @@ Single-Turn JSON Evaluation:
 
     logger.info("")
     logger.info("="*80)
-    logger.info("MALNUTRITION MODEL EVALUATION v3.1.0 (SINGLE-TURN JSON)")
+    logger.info("MALNUTRITION MODEL EVALUATION v4.0.0 (MULTI-TURN)")
     logger.info("="*80)
     logger.info(f"Model: {args.model}")
     logger.info(f"Model type: {args.model_type}")
@@ -720,34 +707,41 @@ Single-Turn JSON Evaluation:
     logger.info("")
 
     try:
+        # Initialize evaluator
         evaluator = MalnutritionEvaluator(
             model_path=args.model,
             model_type=args.model_type,
+            chat_template=args.chat_template,
             temperature=args.temperature,
+            max_seq_length=args.max_seq_length,
             max_new_tokens=args.max_tokens,
             cuda_device=args.cuda_device
         )
 
-        evaluator.load_model(max_seq_length=args.max_seq_length)
+        # Load model
+        evaluator.load_model()
 
+        # Run evaluation
         results = evaluator.evaluate_dataset(
             test_csv=args.csv,
             output_dir=args.output,
             save_predictions=True
         )
 
+        # Print results
         evaluator.print_results(results)
 
-        logger.info(f"\nEvaluation completed successfully!")
+        logger.info(f"\n✓ Evaluation completed successfully!")
         logger.info(f"Results saved to: {args.output}")
-        logger.info(f"  - predictions.csv: Includes model responses and json_output")
-        logger.info(f"  - metrics.json: Comprehensive metrics with evaluation metadata")
+        logger.info(f"  - predictions.csv: Full predictions with all responses")
+        logger.info(f"  - metrics.json: Comprehensive metrics")
         logger.info(f"  - evaluation_summary.txt: Human-readable report")
         logger.info("")
-        logger.info("Single-Turn JSON Evaluation Summary:")
-        logger.info(f"  - One comprehensive question per clinical note")
-        logger.info(f"  - Returns JSON with: growth_assessment, diagnosis_reasoning, malnutrition_status")
-        logger.info(f"  - Avoids context accumulation issues from multi-turn approach")
+        logger.info("Multi-Turn Conversation Summary:")
+        logger.info(f"  - {len(EVALUATION_QUESTIONS)} questions per patient")
+        logger.info(f"  - Conversation history maintained within patient")
+        logger.info(f"  - Clean reset between patients (no leakage)")
+        logger.info(f"  - Clinical note included only in first message")
 
         return 0
 
