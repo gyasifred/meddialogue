@@ -221,15 +221,13 @@ class MalnutritionEvaluator:
         print("SINGLE-TURN EVALUATION (Comprehensive JSON Response)")
         print("="*80)
 
-        # Single comprehensive question asking for complete assessment in JSON
+        # Use simple training-style question - model knows to return JSON when format specified
+        # Don't provide example that model just echoes
         evaluation_question = (
-            "Analyze this clinical note and provide a complete malnutrition assessment. "
-            "Return your response as a JSON object with these fields:\n"
-            "- growth_assessment: anthropometric measurements, trends, and trajectories\n"
-            "- diagnosis_reasoning: your clinical reasoning and evidence synthesis\n"
-            "- malnutrition_status: 'Malnutrition Present' or 'Malnutrition Absent'\n\n"
-            "Example format:\n"
-            '{"growth_assessment": "...", "diagnosis_reasoning": "...", "malnutrition_status": "Malnutrition Absent"}'
+            "Provide a complete malnutrition assessment with these fields: "
+            "growth_assessment (anthropometric measurements with dates and trends), "
+            "diagnosis_reasoning (clinical reasoning and evidence synthesis), "
+            "malnutrition_status (either 'Malnutrition Present' or 'Malnutrition Absent')."
         )
 
         print(f"\nQ: {evaluation_question}\n")
@@ -272,33 +270,55 @@ class MalnutritionEvaluator:
         """
         Extract JSON from response with robust handling.
 
-        CRITICAL FIX: Handles multiple JSON objects, single quotes, and embedded examples.
-        Takes the LAST valid JSON object (most likely to be the actual answer).
+        Uses proper JSON parsing instead of regex to handle nested content.
         """
-        # Normalize: Replace single quotes with double quotes for Python dict-style JSON
-        response_normalized = response.replace("'", '"')
+        # First try: Parse the entire response as JSON
+        try:
+            parsed = json.loads(response.strip())
+            if isinstance(parsed, dict) and "malnutrition_status" in parsed:
+                return parsed
+        except json.JSONDecodeError:
+            pass
 
-        # Find ALL JSON blocks (non-greedy)
-        # Use non-greedy .*? to avoid matching across multiple objects
-        json_matches = re.findall(r'\{[^{}]*?"malnutrition_status"[^{}]*?\}', response_normalized, re.DOTALL)
+        # Second try: Find JSON object using brace matching
+        # This properly handles nested content like parentheses in measurements
+        start_idx = response.find('{')
+        if start_idx != -1:
+            # Find matching closing brace by counting
+            brace_count = 0
+            for i, char in enumerate(response[start_idx:], start_idx):
+                if char == '{':
+                    brace_count += 1
+                elif char == '}':
+                    brace_count -= 1
+                    if brace_count == 0:
+                        json_str = response[start_idx:i+1]
+                        try:
+                            parsed = json.loads(json_str)
+                            if isinstance(parsed, dict) and "malnutrition_status" in parsed:
+                                return parsed
+                        except json.JSONDecodeError:
+                            pass
+                        break
 
-        if json_matches:
-            # Try parsing from LAST match (most likely to be the actual answer, not an example)
-            for json_str in reversed(json_matches):
-                try:
-                    parsed = json.loads(json_str)
-                    # Validate it has the expected key
-                    if "malnutrition_status" in parsed:
-                        return parsed
-                except json.JSONDecodeError:
-                    continue
-
-            # If all fail, try first match
-            for json_str in json_matches:
-                try:
-                    return json.loads(json_str)
-                except json.JSONDecodeError:
-                    continue
+        # Third try: Look for the last JSON object (in case there are multiple)
+        last_start = response.rfind('{')
+        if last_start != start_idx and last_start != -1:
+            brace_count = 0
+            for i, char in enumerate(response[last_start:], last_start):
+                if char == '{':
+                    brace_count += 1
+                elif char == '}':
+                    brace_count -= 1
+                    if brace_count == 0:
+                        json_str = response[last_start:i+1]
+                        try:
+                            parsed = json.loads(json_str)
+                            if isinstance(parsed, dict) and "malnutrition_status" in parsed:
+                                return parsed
+                        except json.JSONDecodeError:
+                            pass
+                        break
 
         # Fallback: return default
         logger.warning(f"Could not extract valid JSON from response: {response[:200]}")
