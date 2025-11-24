@@ -59,12 +59,26 @@ logger = logging.getLogger(__name__)
 
 
 # =================================================================
-# Evaluation Questions (from training templates)
+# Evaluation Questions (from training templates - Priority Order)
 # =================================================================
+# Priority 1: growth_and_anthropometrics, physical_exam, labs_and_screening
+# Priority 2: diagnosis_and_reasoning
+# Priority 3: malnutrition_status (MUST BE LAST)
 
 EVALUATION_QUESTIONS = [
+    # Priority 1 - Question 1: Growth & Anthropometrics
     "What are ALL anthropometric measurements with DATES? Calculate trends and trajectories.",
-    "What's your diagnosis with complete clinical reasoning? Synthesize ALL evidence temporally.",
+
+    # Priority 1 - Question 2: Physical Exam
+    "Document nutrition-focused physical exam findings: muscle mass, subcutaneous fat, edema, micronutrient deficiency signs. Do findings meet ASPEN criteria?",
+
+    # Priority 1 - Question 3: Labs & Screening
+    "Extract ALL nutrition-relevant laboratory values with dates: visceral proteins, CBC, micronutrients, inflammatory markers. Calculate trends and identify deficiencies.",
+
+    # Priority 2 - Question 4: Diagnosis & Reasoning
+    "What's your diagnosis with complete clinical reasoning? Synthesize ALL evidence (anthropometrics, physical exam, labs) temporally.",
+
+    # Priority 3 - Question 5: Malnutrition Status (FINAL)
     "Is malnutrition present or absent? State 'Malnutrition Present' or 'Malnutrition Absent'."
 ]
 
@@ -87,18 +101,26 @@ class MalnutritionEvaluator:
     # Patterns to extract malnutrition status from final response
     PRESENT_PATTERNS = [
         r'\bmalnutrition\s+(is\s+)?present\b',
-        r'\byes\b.*\bmalnutrition\b',
+        r'\byes\b.*(malnutrition|malnourished)\b',
         r'\bmalnutrition\s+confirmed\b',
-        r'\bmalnourished\b',
-        r'\bdiagnosis:?\s+malnutrition\b'
+        r'(?<!\bnot\s)(?<!\bno\s)\b(is\s+)?malnourished\b',  # malnourished but NOT preceded by "not" or "no"
+        r'\bdiagnosis:?\s+malnutrition\b',
+        r'\bhas\s+malnutrition\b',
+        r'\bpositive\s+for\s+malnutrition\b',
+        r'\bpatient\s+(is\s+)?malnourished\b',
+        r'\bchild\s+(is\s+)?malnourished\b'
     ]
 
     ABSENT_PATTERNS = [
         r'\bmalnutrition\s+(is\s+)?absent\b',
-        r'\bno\b.*\bmalnutrition\b',
-        r'\bnot\s+malnourished\b',
+        r'\bno\b.*(malnutrition|malnourished)\b',
+        r'\b(is\s+)?not\s+malnourished\b',
+        r'\b(is\s+)?not\s+malnutrition\b',
         r'\bno\s+evidence\s+of\s+malnutrition\b',
-        r'\bdoes\s+not\s+meet\s+criteria\b'
+        r'\bdoes\s+not\s+meet\s+criteria\b',
+        r'\bwell[\s-]nourished\b',
+        r'\bnormal\s+nutritional\s+status\b',
+        r'\bno\s*[-–—]\s*.*(malnutrition|malnourished)\b'
     ]
 
     def __init__(
@@ -108,7 +130,7 @@ class MalnutritionEvaluator:
         chat_template: str = None,
         temperature: float = 0.1,
         max_seq_length: int = 4096,
-        max_new_tokens: int = 1024,
+        max_new_tokens: int = 2048,
         cuda_device: Optional[int] = None
     ):
         """Initialize evaluator with model configuration."""
@@ -350,7 +372,7 @@ class MalnutritionEvaluator:
 
     def _parse_malnutrition_status(self, response: str) -> Tuple[int, float]:
         """Parse malnutrition status from response."""
-        response_lower = response.lower()
+        response_lower = response.lower().strip()
 
         # Count pattern matches
         present_score = sum(1 for pattern in self.PRESENT_PATTERNS
@@ -363,14 +385,24 @@ class MalnutritionEvaluator:
         elif absent_score > present_score:
             return 0, min(0.95, 0.5 + 0.1 * absent_score)
         else:
-            # Check for explicit "present" or "absent"
+            # Fallback: Check for explicit keywords
             if "present" in response_lower and "absent" not in response_lower:
                 return 1, 0.85
-            elif "absent" in response_lower:
+            elif "absent" in response_lower and "present" not in response_lower:
                 return 0, 0.85
-            else:
-                logger.warning(f"Ambiguous response: {response[:100]}")
-                return 0, 0.5
+
+            # Check for simple yes/no at start
+            response_words = response_lower.split()
+            if response_words:
+                first_word = response_words[0].rstrip('.,!?;:-')
+                if first_word == "yes":
+                    return 1, 0.75
+                elif first_word == "no":
+                    return 0, 0.75
+
+            # Last resort: default to absent with low confidence
+            logger.warning(f"Ambiguous response (defaulting to Absent): {response[:100]}")
+            return 0, 0.5
 
     def evaluate_dataset(
         self,
