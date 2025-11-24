@@ -218,16 +218,16 @@ class MalnutritionEvaluator:
             Tuple of (combined_response, predicted_label, confidence)
         """
         print("\n" + "="*80)
-        print("SINGLE-TURN EVALUATION (Comprehensive JSON Response)")
+        print("SINGLE-TURN EVALUATION (Training-Style Questions)")
         print("="*80)
 
-        # Use simple training-style question - model knows to return JSON when format specified
-        # Don't provide example that model just echoes
+        # Use EXACT training-style questions that match how model was trained
+        # Training data used specific, actionable questions - not abstract field names
+        # The model returns JSON with these question texts as keys
         evaluation_question = (
-            "Provide a complete malnutrition assessment with these fields: "
-            "growth_assessment (anthropometric measurements with dates and trends), "
-            "diagnosis_reasoning (clinical reasoning and evidence synthesis), "
-            "malnutrition_status (either 'Malnutrition Present' or 'Malnutrition Absent')."
+            "What are ALL anthropometric measurements with DATES? Calculate trends and trajectories. "
+            "What's your diagnosis with complete clinical reasoning? Synthesize ALL evidence temporally. "
+            "Is malnutrition present or absent? State clearly."
         )
 
         print(f"\nQ: {evaluation_question}\n")
@@ -270,21 +270,53 @@ class MalnutritionEvaluator:
         """
         Extract JSON from response with robust handling.
 
+        Handles both training-style (question text as keys) and field name keys.
         Uses proper JSON parsing instead of regex to handle nested content.
         """
+        def has_malnutrition_key(parsed: Dict) -> bool:
+            """Check if parsed dict has malnutrition status info."""
+            if not isinstance(parsed, dict):
+                return False
+            # Check for field name key
+            if "malnutrition_status" in parsed:
+                return True
+            # Check for training-style question text keys
+            for key in parsed.keys():
+                key_lower = key.lower()
+                if "malnutrition" in key_lower and ("present" in key_lower or "absent" in key_lower):
+                    return True
+            return False
+
+        def normalize_json(parsed: Dict) -> Dict:
+            """Normalize JSON to use field names as keys."""
+            if "malnutrition_status" in parsed:
+                return parsed
+
+            # Convert training-style question keys to field names
+            normalized = {}
+            for key, value in parsed.items():
+                key_lower = key.lower()
+                if "anthropometric" in key_lower or "measurement" in key_lower or "growth" in key_lower:
+                    normalized["growth_assessment"] = value
+                elif "diagnosis" in key_lower or "reasoning" in key_lower:
+                    normalized["diagnosis_reasoning"] = value
+                elif "malnutrition" in key_lower and ("present" in key_lower or "absent" in key_lower):
+                    normalized["malnutrition_status"] = value
+                else:
+                    normalized[key] = value
+            return normalized
+
         # First try: Parse the entire response as JSON
         try:
             parsed = json.loads(response.strip())
-            if isinstance(parsed, dict) and "malnutrition_status" in parsed:
-                return parsed
+            if has_malnutrition_key(parsed):
+                return normalize_json(parsed)
         except json.JSONDecodeError:
             pass
 
         # Second try: Find JSON object using brace matching
-        # This properly handles nested content like parentheses in measurements
         start_idx = response.find('{')
         if start_idx != -1:
-            # Find matching closing brace by counting
             brace_count = 0
             for i, char in enumerate(response[start_idx:], start_idx):
                 if char == '{':
@@ -295,13 +327,13 @@ class MalnutritionEvaluator:
                         json_str = response[start_idx:i+1]
                         try:
                             parsed = json.loads(json_str)
-                            if isinstance(parsed, dict) and "malnutrition_status" in parsed:
-                                return parsed
+                            if has_malnutrition_key(parsed):
+                                return normalize_json(parsed)
                         except json.JSONDecodeError:
                             pass
                         break
 
-        # Third try: Look for the last JSON object (in case there are multiple)
+        # Third try: Look for the last JSON object
         last_start = response.rfind('{')
         if last_start != start_idx and last_start != -1:
             brace_count = 0
@@ -314,8 +346,8 @@ class MalnutritionEvaluator:
                         json_str = response[last_start:i+1]
                         try:
                             parsed = json.loads(json_str)
-                            if isinstance(parsed, dict) and "malnutrition_status" in parsed:
-                                return parsed
+                            if has_malnutrition_key(parsed):
+                                return normalize_json(parsed)
                         except json.JSONDecodeError:
                             pass
                         break
