@@ -218,16 +218,20 @@ class MalnutritionEvaluator:
             Tuple of (combined_response, predicted_label, confidence)
         """
         print("\n" + "="*80)
-        print("SINGLE-TURN EVALUATION (Comprehensive JSON Response)")
+        print("SINGLE-TURN EVALUATION (JSON Template with Questions)")
         print("="*80)
 
-        # Use simple training-style question - model knows to return JSON when format specified
-        # Don't provide example that model just echoes
+        # Provide JSON template with field names as keys and questions as values
+        # Model completes by replacing questions with answers
+        json_template = {
+            "growth_assessment": "What are ALL anthropometric measurements with DATES? Calculate trends and trajectories.",
+            "diagnosis_reasoning": "What's your diagnosis with complete clinical reasoning? Synthesize ALL evidence temporally.",
+            "malnutrition_status": "Is malnutrition present or absent? State 'Malnutrition Present' or 'Malnutrition Absent'."
+        }
+
         evaluation_question = (
-            "Provide a complete malnutrition assessment with these fields: "
-            "growth_assessment (anthropometric measurements with dates and trends), "
-            "diagnosis_reasoning (clinical reasoning and evidence synthesis), "
-            "malnutrition_status (either 'Malnutrition Present' or 'Malnutrition Absent')."
+            "Complete this JSON by replacing each question with your answer:\n\n"
+            f"{json.dumps(json_template, indent=2)}"
         )
 
         print(f"\nQ: {evaluation_question}\n")
@@ -270,68 +274,135 @@ class MalnutritionEvaluator:
         """
         Extract JSON from response with robust handling.
 
-        Uses proper JSON parsing instead of regex to handle nested content.
+        Handles field name keys and extracts malnutrition status from values.
+        Uses proper JSON parsing with brace matching for nested content.
         """
+        def is_valid_assessment(parsed: Dict) -> bool:
+            """Check if parsed dict is a valid assessment JSON."""
+            if not isinstance(parsed, dict) or len(parsed) == 0:
+                return False
+            # Accept any dict with at least one key (model response)
+            return True
+
+        def normalize_json(parsed: Dict) -> Dict:
+            """Normalize JSON to standard field names and extract status."""
+            normalized = {}
+            malnutrition_value = None
+
+            for key, value in parsed.items():
+                key_lower = key.lower()
+                value_str = str(value).lower() if value else ""
+
+                # Map to standard field names
+                if key == "growth_assessment" or "anthropometric" in key_lower or "measurement" in key_lower or "growth" in key_lower:
+                    normalized["growth_assessment"] = value
+                elif key == "diagnosis_reasoning" or "diagnosis" in key_lower or "reasoning" in key_lower:
+                    normalized["diagnosis_reasoning"] = value
+                elif key == "malnutrition_status" or "malnutrition" in key_lower:
+                    normalized["malnutrition_status"] = value
+                    malnutrition_value = value_str
+                else:
+                    normalized[key] = value
+                    # Check if value contains malnutrition status
+                    if "malnutrition" in value_str and ("present" in value_str or "absent" in value_str):
+                        if "malnutrition_status" not in normalized:
+                            if "present" in value_str:
+                                normalized["malnutrition_status"] = "Malnutrition Present"
+                            else:
+                                normalized["malnutrition_status"] = "Malnutrition Absent"
+
+            # Ensure malnutrition_status exists
+            if "malnutrition_status" not in normalized:
+                # Search all values for status
+                for value in parsed.values():
+                    value_str = str(value).lower()
+                    if "malnutrition present" in value_str:
+                        normalized["malnutrition_status"] = "Malnutrition Present"
+                        break
+                    elif "malnutrition absent" in value_str or "no malnutrition" in value_str:
+                        normalized["malnutrition_status"] = "Malnutrition Absent"
+                        break
+
+            return normalized
+
+        def extract_json_from_text(text: str) -> Optional[Dict]:
+            """Extract JSON object from text using brace matching."""
+            start_idx = text.find('{')
+            if start_idx == -1:
+                return None
+
+            brace_count = 0
+            for i, char in enumerate(text[start_idx:], start_idx):
+                if char == '{':
+                    brace_count += 1
+                elif char == '}':
+                    brace_count -= 1
+                    if brace_count == 0:
+                        json_str = text[start_idx:i+1]
+                        try:
+                            return json.loads(json_str)
+                        except json.JSONDecodeError:
+                            return None
+            return None
+
         # First try: Parse the entire response as JSON
         try:
             parsed = json.loads(response.strip())
-            if isinstance(parsed, dict) and "malnutrition_status" in parsed:
-                return parsed
+            if is_valid_assessment(parsed):
+                return normalize_json(parsed)
         except json.JSONDecodeError:
             pass
 
-        # Second try: Find JSON object using brace matching
-        # This properly handles nested content like parentheses in measurements
-        start_idx = response.find('{')
-        if start_idx != -1:
-            # Find matching closing brace by counting
-            brace_count = 0
-            for i, char in enumerate(response[start_idx:], start_idx):
-                if char == '{':
-                    brace_count += 1
-                elif char == '}':
-                    brace_count -= 1
-                    if brace_count == 0:
-                        json_str = response[start_idx:i+1]
-                        try:
-                            parsed = json.loads(json_str)
-                            if isinstance(parsed, dict) and "malnutrition_status" in parsed:
-                                return parsed
-                        except json.JSONDecodeError:
-                            pass
-                        break
+        # Second try: Extract first JSON object
+        parsed = extract_json_from_text(response)
+        if parsed and is_valid_assessment(parsed):
+            return normalize_json(parsed)
 
-        # Third try: Look for the last JSON object (in case there are multiple)
-        last_start = response.rfind('{')
-        if last_start != start_idx and last_start != -1:
-            brace_count = 0
-            for i, char in enumerate(response[last_start:], last_start):
-                if char == '{':
-                    brace_count += 1
-                elif char == '}':
-                    brace_count -= 1
-                    if brace_count == 0:
-                        json_str = response[last_start:i+1]
-                        try:
-                            parsed = json.loads(json_str)
-                            if isinstance(parsed, dict) and "malnutrition_status" in parsed:
-                                return parsed
-                        except json.JSONDecodeError:
-                            pass
-                        break
+        # Third try: Look for last JSON object (in case first was an example)
+        last_brace = response.rfind('{')
+        first_brace = response.find('{')
+        if last_brace != first_brace and last_brace != -1:
+            parsed = extract_json_from_text(response[last_brace:])
+            if parsed and is_valid_assessment(parsed):
+                return normalize_json(parsed)
 
-        # Fallback: return default
-        logger.warning(f"Could not extract valid JSON from response: {response[:200]}")
+        # Fourth try: Extract status from plain text using regex
+        response_lower = response.lower()
+        if "malnutrition present" in response_lower:
+            return {"malnutrition_status": "Malnutrition Present"}
+        elif "malnutrition absent" in response_lower or "no malnutrition" in response_lower:
+            return {"malnutrition_status": "Malnutrition Absent"}
+
+        # Fallback: return default with warning
+        logger.warning(f"Could not extract valid JSON from response: {response[:300]}")
         return {"malnutrition_status": "Malnutrition Absent"}
 
     def _parse_from_json_or_fallback(self, json_obj: Dict, raw_response: str) -> Tuple[int, float]:
         """Parse label from JSON, fallback to regex if invalid."""
-        status = json_obj.get("malnutrition_status", "").strip().lower()
+        status = json_obj.get("malnutrition_status", "")
 
-        if "present" in status:
+        if not status:
+            # Try to find status in any field value
+            for value in json_obj.values():
+                value_str = str(value).lower()
+                if "malnutrition present" in value_str:
+                    return 1, 0.90
+                elif "malnutrition absent" in value_str or "no malnutrition" in value_str:
+                    return 0, 0.90
+            # Fallback to regex
+            return self._parse_classification(raw_response)
+
+        status_lower = str(status).lower()
+
+        # Check for various status formats
+        if "present" in status_lower and "absent" not in status_lower:
             return 1, 0.95
-        elif "absent" in status:
+        elif "absent" in status_lower or "no malnutrition" in status_lower or "not malnourished" in status_lower:
             return 0, 0.95
+        elif status_lower in ["yes", "1", "true", "positive"]:
+            return 1, 0.90
+        elif status_lower in ["no", "0", "false", "negative"]:
+            return 0, 0.90
         else:
             # Fallback to regex
             return self._parse_classification(raw_response)
