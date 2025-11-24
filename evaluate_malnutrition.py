@@ -61,24 +61,27 @@ logger = logging.getLogger(__name__)
 # =================================================================
 # Evaluation Questions (from training templates - Priority Order)
 # =================================================================
-# Priority 1: growth_and_anthropometrics, physical_exam, labs_and_screening
+# Priority 1: case_presentation, growth_and_anthropometrics, physical_exam, labs_and_screening
 # Priority 2: diagnosis_and_reasoning
 # Priority 3: malnutrition_status (MUST BE LAST)
 
 EVALUATION_QUESTIONS = [
-    # Priority 1 - Question 1: Growth & Anthropometrics
+    # Priority 1 - Question 1: Case Presentation
+    "Document the clinical presentation including chief concern, temporal context, and assessment type (single-point vs serial/longitudinal). What additional history would strengthen the assessment?",
+
+    # Priority 1 - Question 2: Growth & Anthropometrics
     "What are ALL anthropometric measurements with DATES? Calculate trends and trajectories.",
 
-    # Priority 1 - Question 2: Physical Exam
+    # Priority 1 - Question 3: Physical Exam
     "Document nutrition-focused physical exam findings: muscle mass, subcutaneous fat, edema, micronutrient deficiency signs. Do findings meet ASPEN criteria?",
 
-    # Priority 1 - Question 3: Labs & Screening
+    # Priority 1 - Question 4: Labs & Screening
     "Extract ALL nutrition-relevant laboratory values with dates: visceral proteins, CBC, micronutrients, inflammatory markers. Calculate trends and identify deficiencies.",
 
-    # Priority 2 - Question 4: Diagnosis & Reasoning
-    "What's your diagnosis with complete clinical reasoning? Synthesize ALL evidence (anthropometrics, physical exam, labs) temporally.",
+    # Priority 2 - Question 5: Diagnosis & Reasoning
+    "What's your diagnosis with complete clinical reasoning? Synthesize ALL evidence (case presentation, anthropometrics, physical exam, labs) temporally.",
 
-    # Priority 3 - Question 5: Malnutrition Status (FINAL)
+    # Priority 3 - Question 6: Malnutrition Status (FINAL)
     "Is malnutrition present or absent? State 'Malnutrition Present' or 'Malnutrition Absent'."
 ]
 
@@ -315,10 +318,8 @@ class MalnutritionEvaluator:
         all_responses = []
 
         print(f"\n{'='*80}")
-        print(f"EVALUATING PATIENT: {patient_id}")
+        print(f"Patient: {patient_id} | Note Length: {len(clinical_note)} chars")
         print(f"{'='*80}")
-        print(f"Clinical Note Length: {len(clinical_note)} characters")
-        print(f"{'='*80}\n")
 
         # Ask questions in order
         for i, question in enumerate(EVALUATION_QUESTIONS, 1):
@@ -328,38 +329,21 @@ class MalnutritionEvaluator:
 
             # Show what's being passed
             if i == 1:
-                print(f"\n📝 INPUT TO MODEL (Turn {i}):")
-                print(f"{'='*80}")
-                print(f"CLINICAL NOTE (first {500} chars):")
-                print(f"{'-'*80}")
-                print(clinical_note[:500] + "..." if len(clinical_note) > 500 else clinical_note)
-                print(f"{'-'*80}")
-                print(f"\nQUESTION {i}:")
-                print(f"{question}")
-                print(f"{'='*80}")
-                print(f"\n⚠️ NOTE: Clinical note is included ONLY in this first message")
-                print(f"⚠️ Conversation history: 0 previous turns")
+                print(f"\n📝 Turn {i} Input:")
+                print(f"Clinical note + Question {i}")
+                print(f"Question: {question[:100]}...")
             else:
-                print(f"\n📝 INPUT TO MODEL (Turn {i}):")
-                print(f"{'='*80}")
-                print(f"QUESTION {i}:")
-                print(f"{question}")
-                print(f"{'='*80}")
-                print(f"\n⚠️ NOTE: NO clinical note (already sent in Turn 1)")
-                print(f"⚠️ Conversation history: {len(self.current_conversation)//2} previous turns")
-                print(f"⚠️ Model sees ALL previous questions and answers")
+                print(f"\n📝 Turn {i} Input:")
+                print(f"Question {i} (with conversation history)")
+                print(f"Question: {question[:100]}...")
 
             # Include clinical note only in first message
             clinical_note_to_pass = clinical_note if i == 1 else None
 
-            print(f"\n⏳ Generating response...")
             response = self.generate_response(question, clinical_note_to_pass)
             all_responses.append(response)
 
-            print(f"\n✅ RESPONSE {i}:")
-            print(f"{'='*80}")
-            print(response)
-            print(f"{'='*80}\n")
+            print(f"✅ Response {i}: {response[:150]}..." if len(response) > 150 else f"✅ Response {i}: {response}")
 
         # Extract malnutrition status from final response
         final_response = all_responses[-1]
