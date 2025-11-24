@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-Malnutrition Model Evaluation Script - v3.1.0 (Single-Turn JSON Evaluation)
+Malnutrition Model Evaluation Script - v3.1.1 (Fixed Single-Turn JSON)
 =============================================================================
 Evaluates trained MedDialogue malnutrition models on test datasets.
 
 Author: Frederick Gyasi (gyasi@musc.edu)
 Institution: Medical University of South Carolina, Biomedical Informatics Center
-Version: 3.1.0
+Version: 3.1.1 - Fixed JSON extraction and tuple handling
 """
 import os
 import sys
@@ -47,16 +47,11 @@ logger = logging.getLogger(__name__)
 class MalnutritionEvaluator:
     """
     Evaluator for malnutrition classification models with single-turn JSON evaluation.
-
-    Handles:
-    - Model loading (adapter or merged)
-    - Single-turn inference with comprehensive JSON response
-    - Batch inference with progress tracking
-    - JSON response enforcement and extraction
-    - Comprehensive metrics calculation
-    - Results saving (CSV, JSON, plots)
-    - Proper inference isolation (no history carryover between samples)
-    - Memory optimization with garbage collection
+    
+    Fixed Issues:
+    - Tuple handling in JSON extraction
+    - Robust status extraction from nested structures
+    - Proper string conversion before processing
     """
 
     # Patterns to extract malnutrition status from responses (fallback if JSON fails)
@@ -99,26 +94,19 @@ class MalnutritionEvaluator:
         self.device = None
         self.inference_pipeline = None
 
-        # Task configuration for malnutrition
+        # Task configuration for malnutrition (simplified - no question templates)
         self.task_config = TaskConfig(
             task_name="pediatric_malnutrition_evaluation",
             task_description="Evaluate malnutrition status with clinical reasoning",
             input_field="txt",
             output_fields=["malnutrition_status"],
-            question_templates={
-                "malnutrition_status": [
-                    "Is malnutrition present or absent?",
-                    "Classify malnutrition status"
-                ]
-            },
             output_formats=[OutputFormat.JSON, OutputFormat.TEXT]
         )
 
-        logger.info(f"Evaluator initialized for {model_type} (Single-Turn JSON v3.1)")
+        logger.info(f"Evaluator initialized for {model_type} (Fixed Single-Turn JSON v3.1.1)")
         logger.info(f"Model path: {model_path}")
         logger.info(f"Temperature: {temperature}")
         logger.info(f"Max tokens: {max_new_tokens}")
-        logger.info(f"Evaluation: Single-turn with comprehensive JSON response")
 
     def load_model(self, max_seq_length: int = 16384):
         """Load trained model for inference."""
@@ -175,19 +163,16 @@ class MalnutritionEvaluator:
             temperature=self.temperature,
             device=self.device
         )
-        logger.info("Inference pipeline initialized for single-turn JSON evaluation")
+        logger.info("Inference pipeline initialized")
         logger.info("="*80)
 
     def infer_single(self, clinical_note: str) -> Tuple[str, int, float]:
         """
         Run inference on single clinical note using single-turn evaluation.
-
-        Uses a single comprehensive question that returns all assessment in one JSON response.
-        This avoids context accumulation issues in multi-turn conversations.
-
+        
         Args:
             clinical_note: Clinical text
-
+            
         Returns:
             Tuple of (combined_response, predicted_label, confidence)
         """
@@ -195,17 +180,18 @@ class MalnutritionEvaluator:
         print("SINGLE-TURN EVALUATION")
         print("="*80)
 
-        # Simple numbered questions - model returns JSON response
+        # Complete evaluation question (no template)
         evaluation_question = (
-            "1. Summarize the presenting problem with timeline of events. What is the family's primary concern and how has it evolved over time? \n",
-            "2. Extract all anthropometric measurements with dates: weight, height/length, BMI, MUAC, head circumference. Calculate z-scores and percentiles using appropriate growth references (WHO 0-2y, CDC 2-20y)\n",
-            "3. Extract all nutrition-relevant laboratory values with dates: visceral proteins (albumin, prealbumin, total protein), CMP, CBC, micronutrients (25-OH vitamin D, iron studies, zinc, folate, B12), inflammatory markers (CRP, ESR). Document reference ranges and units.\n",
-            "4. What's your diagnosis with complete clinical reasoning? Synthesize ALL evidence temporally.\n"
-            "5. State the malnutrition classification clearly: 'Malnutrition present' or 'Malnutrition absent'.\n\n"
-            "Return your response in JSON."
+            "Analyze this clinical note and provide a comprehensive malnutrition assessment:\n\n"
+            "1. Summarize the presenting problem with timeline of events. What is the family's primary concern and how has it evolved over time?\n\n"
+            "2. Extract all anthropometric measurements with dates: weight, height/length, BMI, MUAC, head circumference. Calculate z-scores and percentiles using appropriate growth references (WHO 0-2y, CDC 2-20y).\n\n"
+            "3. Extract all nutrition-relevant laboratory values with dates: visceral proteins (albumin, prealbumin, total protein), CMP, CBC, micronutrients (25-OH vitamin D, iron studies, zinc, folate, B12), inflammatory markers (CRP, ESR). Document reference ranges and units.\n\n"
+            "4. Provide your clinical diagnosis with complete reasoning. Synthesize ALL evidence temporally.\n\n"
+            "5. State the final malnutrition classification clearly as either 'Malnutrition Present' or 'Malnutrition Absent'.\n\n"
+            "Return your response in JSON format with the following fields: growth_assessment, lab_findings, diagnosis_reasoning, malnutrition_status."
         )
 
-        print(f"\nQ: {evaluation_question}\n")
+        print(f"\nQ: {evaluation_question[:200]}...\n")
         print("=" * 80)
         print("Running single-turn inference...\n")
 
@@ -217,15 +203,11 @@ class MalnutritionEvaluator:
             return_full_response=False
         )
 
-        # Convert response to string for processing
-        if isinstance(response, dict):
-            response_str = json.dumps(response)
-            json_response = response
-        else:
-            response_str = str(response)
-            json_response = self._extract_json_response(response_str)
+        # Convert response to string - FIXED: handle all response types
+        response_str = self._safe_response_to_string(response)
+        json_response = self._extract_json_response(response_str)
 
-        print(f"RESPONSE:\n{response_str}\n")
+        print(f"RESPONSE:\n{response_str[:500]}...\n")
         print("JSON OUTPUT:")
         print(json.dumps(json_response, indent=2))
         print("="*80 + "\n")
@@ -235,66 +217,86 @@ class MalnutritionEvaluator:
             json_response, response_str
         )
 
-        # If JSON parsing fails, try regex on full response
-        if confidence < 0.7:
-            predicted_label, confidence = self._parse_classification(response_str)
-
         return response_str, predicted_label, confidence
+
+    def _safe_response_to_string(self, response: Any) -> str:
+        """
+        Safely convert any response type to string.
+        
+        FIXED: Handles dict, tuple, list, and other types properly.
+        """
+        if isinstance(response, str):
+            return response
+        elif isinstance(response, dict):
+            return json.dumps(response)
+        elif isinstance(response, (tuple, list)):
+            # If tuple/list, try to extract the actual response
+            if len(response) > 0:
+                first_item = response[0]
+                if isinstance(first_item, str):
+                    return first_item
+                elif isinstance(first_item, dict):
+                    return json.dumps(first_item)
+            # Fallback: convert entire structure to JSON
+            return json.dumps(response)
+        else:
+            # For any other type, convert to string
+            return str(response)
 
     def _extract_json_response(self, response: str) -> Dict:
         """
         Extract JSON from response with robust handling.
-
-        Handles field name keys and extracts malnutrition status from values.
-        Uses proper JSON parsing with brace matching for nested content.
+        
+        FIXED: Better nested structure handling and status extraction.
         """
-        def is_valid_assessment(parsed: Dict) -> bool:
-            """Check if parsed dict is a valid assessment JSON."""
-            if not isinstance(parsed, dict) or len(parsed) == 0:
-                return False
-            # Accept any dict with at least one key (model response)
-            return True
+        def extract_status_from_text(text: str) -> Optional[str]:
+            """Extract malnutrition status from plain text."""
+            if not text:
+                return None
+            text_lower = text.lower()
+            
+            # Check for explicit status statements
+            if "malnutrition present" in text_lower or "malnutrition is present" in text_lower:
+                return "Malnutrition Present"
+            elif "malnutrition absent" in text_lower or "malnutrition is absent" in text_lower:
+                return "Malnutrition Absent"
+            elif "no malnutrition" in text_lower or "not malnourished" in text_lower:
+                return "Malnutrition Absent"
+            
+            # Check for yes/no responses
+            malnutrition_match = re.search(r'malnutrition[:\s]+(\w+)', text_lower)
+            if malnutrition_match:
+                answer = malnutrition_match.group(1)
+                if answer in ['yes', 'present', 'positive', 'true', '1']:
+                    return "Malnutrition Present"
+                elif answer in ['no', 'absent', 'negative', 'false', '0']:
+                    return "Malnutrition Absent"
+            
+            return None
 
-        def normalize_json(parsed: Dict) -> Dict:
-            """Normalize JSON to standard field names and extract status."""
-            normalized = {}
-            malnutrition_value = None
-
-            for key, value in parsed.items():
-                key_lower = key.lower()
-                value_str = str(value).lower() if value else ""
-
-                # Map to standard field names
-                if key == "growth_assessment" or "anthropometric" in key_lower or "measurement" in key_lower or "growth" in key_lower:
-                    normalized["growth_assessment"] = value
-                elif key == "diagnosis_reasoning" or "diagnosis" in key_lower or "reasoning" in key_lower:
-                    normalized["diagnosis_reasoning"] = value
-                elif key == "malnutrition_status" or "malnutrition" in key_lower:
-                    normalized["malnutrition_status"] = value
-                    malnutrition_value = value_str
-                else:
-                    normalized[key] = value
-                    # Check if value contains malnutrition status
-                    if "malnutrition" in value_str and ("present" in value_str or "absent" in value_str):
-                        if "malnutrition_status" not in normalized:
-                            if "present" in value_str:
-                                normalized["malnutrition_status"] = "Malnutrition Present"
-                            else:
-                                normalized["malnutrition_status"] = "Malnutrition Absent"
-
-            # Ensure malnutrition_status exists
-            if "malnutrition_status" not in normalized:
-                # Search all values for status
-                for value in parsed.values():
-                    value_str = str(value).lower()
-                    if "malnutrition present" in value_str:
-                        normalized["malnutrition_status"] = "Malnutrition Present"
-                        break
-                    elif "malnutrition absent" in value_str or "no malnutrition" in value_str:
-                        normalized["malnutrition_status"] = "Malnutrition Absent"
-                        break
-
-            return normalized
+        def extract_status_from_dict(data: Dict) -> Optional[str]:
+            """Recursively extract malnutrition status from dict."""
+            # Direct field check
+            for key in ['malnutrition_status', 'status', 'classification', 'diagnosis']:
+                if key in data:
+                    value = data[key]
+                    if isinstance(value, str):
+                        status = extract_status_from_text(value)
+                        if status:
+                            return status
+            
+            # Check all string values
+            for value in data.values():
+                if isinstance(value, str):
+                    status = extract_status_from_text(value)
+                    if status:
+                        return status
+                elif isinstance(value, dict):
+                    status = extract_status_from_dict(value)
+                    if status:
+                        return status
+            
+            return None
 
         def extract_json_from_text(text: str) -> Optional[Dict]:
             """Extract JSON object from text using brace matching."""
@@ -313,83 +315,89 @@ class MalnutritionEvaluator:
                         try:
                             return json.loads(json_str)
                         except json.JSONDecodeError:
-                            return None
+                            continue
             return None
 
-        # First try: Parse the entire response as JSON
+        # Strategy 1: Parse entire response as JSON
         try:
             parsed = json.loads(response.strip())
-            if is_valid_assessment(parsed):
-                return normalize_json(parsed)
+            if isinstance(parsed, dict):
+                status = extract_status_from_dict(parsed)
+                if status:
+                    parsed['malnutrition_status'] = status
+                return parsed
         except json.JSONDecodeError:
             pass
 
-        # Second try: Extract first JSON object
+        # Strategy 2: Extract first JSON object
         parsed = extract_json_from_text(response)
-        if parsed and is_valid_assessment(parsed):
-            return normalize_json(parsed)
+        if parsed and isinstance(parsed, dict):
+            status = extract_status_from_dict(parsed)
+            if status:
+                parsed['malnutrition_status'] = status
+            return parsed
 
-        # Third try: Look for last JSON object (in case first was an example)
-        last_brace = response.rfind('{')
-        first_brace = response.find('{')
-        if last_brace != first_brace and last_brace != -1:
-            parsed = extract_json_from_text(response[last_brace:])
-            if parsed and is_valid_assessment(parsed):
-                return normalize_json(parsed)
+        # Strategy 3: Extract from plain text
+        status = extract_status_from_text(response)
+        if status:
+            return {"malnutrition_status": status}
 
-        # Fourth try: Extract status from plain text using regex
-        response_lower = response.lower()
-        if "malnutrition present" in response_lower:
-            return {"malnutrition_status": "Malnutrition Present"}
-        elif "malnutrition absent" in response_lower or "no malnutrition" in response_lower:
-            return {"malnutrition_status": "Malnutrition Absent"}
-
-        # Fallback: return default with warning
-        logger.warning(f"Could not extract valid JSON from response: {response[:300]}")
-        return {"malnutrition_status": "Malnutrition Absent"}
+        # Fallback: return default
+        logger.warning(f"Could not extract valid JSON or status from response: {response[:300]}")
+        return {"malnutrition_status": "Malnutrition Absent", "parsing_failed": True}
 
     def _parse_from_json_or_fallback(self, json_obj: Dict, raw_response: str) -> Tuple[int, float]:
-        """Parse label from JSON, fallback to regex if invalid."""
+        """
+        Parse label from JSON, fallback to regex if invalid.
+        
+        FIXED: Better confidence scoring and status detection.
+        """
+        # Check if parsing failed
+        parsing_failed = json_obj.get("parsing_failed", False)
+        
+        # Get status from JSON
         status = json_obj.get("malnutrition_status", "")
-
-        if not status:
-            # Try to find status in any field value
-            for value in json_obj.values():
-                value_str = str(value).lower()
-                if "malnutrition present" in value_str:
-                    return 1, 0.90
-                elif "malnutrition absent" in value_str or "no malnutrition" in value_str:
-                    return 0, 0.90
+        
+        if not status or parsing_failed:
             # Fallback to regex
+            logger.warning("Using regex fallback for classification")
             return self._parse_classification(raw_response)
 
-        status_lower = str(status).lower()
+        # Convert to string and check
+        status_str = str(status).lower().strip()
 
         # Check for various status formats
-        if "present" in status_lower and "absent" not in status_lower:
+        if "present" in status_str and "absent" not in status_str:
             return 1, 0.95
-        elif "absent" in status_lower or "no malnutrition" in status_lower or "not malnourished" in status_lower:
+        elif "absent" in status_str or "no malnutrition" in status_str:
             return 0, 0.95
-        elif status_lower in ["yes", "1", "true", "positive"]:
+        elif status_str in ["yes", "1", "true", "positive"]:
             return 1, 0.90
-        elif status_lower in ["no", "0", "false", "negative"]:
+        elif status_str in ["no", "0", "false", "negative"]:
             return 0, 0.90
         else:
             # Fallback to regex
+            logger.warning(f"Ambiguous status: {status_str}, using regex fallback")
             return self._parse_classification(raw_response)
 
     def _parse_classification(self, response: str) -> Tuple[int, float]:
-        """Legacy regex parser (fallback only)."""
+        """
+        Legacy regex parser (fallback only).
+        
+        FIXED: Better confidence calculation.
+        """
         response_lower = response.lower()
         present_score = sum(1 for pattern in self.PRESENT_PATTERNS if re.search(pattern, response_lower))
         absent_score = sum(1 for pattern in self.ABSENT_PATTERNS if re.search(pattern, response_lower))
 
         if present_score > absent_score:
-            return 1, min(0.9, 0.5 + 0.1 * present_score)
+            confidence = min(0.85, 0.5 + 0.1 * present_score)
+            return 1, confidence
         elif absent_score > present_score:
-            return 0, min(0.9, 0.5 + 0.1 * absent_score)
+            confidence = min(0.85, 0.5 + 0.1 * absent_score)
+            return 0, confidence
         else:
-            logger.warning(f"Ambiguous response: {response[:100]}")
+            logger.warning(f"Ambiguous response (equal scores): {response[:200]}")
             return 0, 0.5
 
     def evaluate_dataset(
@@ -400,7 +408,7 @@ class MalnutritionEvaluator:
     ) -> Dict[str, Any]:
         """Evaluate model on test dataset using single-turn JSON evaluation."""
         logger.info("="*80)
-        logger.info("EVALUATION STARTING (SINGLE-TURN JSON EVALUATION)")
+        logger.info("EVALUATION STARTING (FIXED SINGLE-TURN JSON)")
         logger.info("="*80)
         logger.info(f"Test CSV: {test_csv}")
         logger.info(f"Output dir: {output_dir}")
@@ -425,18 +433,17 @@ class MalnutritionEvaluator:
         json_outputs = []
 
         logger.info("Running inference on test set...")
-        # IMPORTANT: Each infer_single() call creates fresh conversation (no history carryover)
         for idx, row in tqdm(df.iterrows(), total=len(df), desc="Evaluating"):
             try:
-                # Each sample processed independently with clean state
                 response, pred, conf = self.infer_single(row["txt"])
                 json_obj = self._extract_json_response(response)
+                
                 predictions.append(pred)
                 confidences.append(conf)
                 responses.append(response)
                 json_outputs.append(json_obj)
 
-                # Memory cleanup: Periodic garbage collection every 10 samples
+                # Memory cleanup every 10 samples
                 if (idx + 1) % 10 == 0:
                     gc.collect()
                     if torch.cuda.is_available():
@@ -444,10 +451,13 @@ class MalnutritionEvaluator:
 
             except Exception as e:
                 logger.error(f"Error on row {idx} (DEID: {row['DEID']}): {e}")
+                import traceback
+                logger.error(traceback.format_exc())
+                
                 predictions.append(-1)
                 confidences.append(0.0)
                 responses.append(f"ERROR: {str(e)}")
-                json_outputs.append({"malnutrition_status": "ERROR"})
+                json_outputs.append({"malnutrition_status": "ERROR", "error": str(e)})
 
         df["predicted_label"] = predictions
         df["confidence"] = confidences
@@ -467,7 +477,6 @@ class MalnutritionEvaluator:
         gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
-        logger.info("Final memory cleanup completed")
         logger.info("="*80)
 
         metrics = self._calculate_metrics(
@@ -485,12 +494,8 @@ class MalnutritionEvaluator:
             "error_examples": error_count,
             "temperature": self.temperature,
             "max_new_tokens": self.max_new_tokens,
-            "output_mode": "Single-Turn JSON Evaluation",
-            "reasoning_steps": 1,
-            "reasoning_process": "Single comprehensive assessment with JSON response",
-            "json_fields": "growth_assessment, diagnosis_reasoning, malnutrition_status",
-            "evaluation_method": "Single-turn inference (avoids context accumulation)",
-            "memory_optimization": "Garbage collection every 10 samples + final cleanup",
+            "version": "3.1.1 - Fixed JSON extraction",
+            "evaluation_method": "Single-turn inference with robust status extraction",
             "metrics": metrics
         }
 
@@ -521,6 +526,7 @@ class MalnutritionEvaluator:
         tn, fp, fn, tp = cm.ravel() if cm.size == 4 else (0, 0, 0, 0)
         specificity = tn / (tn + fp) if (tn + fp) > 0 else 0
         sensitivity = recall
+        
         try:
             auc = roc_auc_score(true_labels, predictions)
         except ValueError:
@@ -580,16 +586,14 @@ class MalnutritionEvaluator:
 
         with open(report_path, "w") as f:
             f.write("="*80 + "\n")
-            f.write("MALNUTRITION MODEL EVALUATION SUMMARY (SINGLE-TURN JSON)\n")
+            f.write("MALNUTRITION MODEL EVALUATION SUMMARY (FIXED v3.1.1)\n")
             f.write("="*80 + "\n\n")
             f.write(f"Model: {results['model_path']}\n")
             f.write(f"Model Type: {results['model_type']}\n")
             f.write(f"Test Data: {results['test_csv']}\n")
             f.write(f"Timestamp: {results['timestamp']}\n")
-            f.write(f"Temperature: {results['temperature']}\n")
-            f.write(f"Output Mode: {results['output_mode']}\n")
-            f.write(f"Evaluation Method: {results['evaluation_method']}\n")
-            f.write(f"JSON Fields: {results['json_fields']}\n")
+            f.write(f"Version: {results['version']}\n")
+            f.write(f"Method: {results['evaluation_method']}\n")
             f.write("\n" + "-"*80 + "\n\n")
             f.write("DATASET STATISTICS:\n")
             f.write(f"  Total examples: {results['total_examples']}\n")
@@ -640,12 +644,11 @@ class MalnutritionEvaluator:
         cm = metrics["confusion_matrix"]
 
         print("\n" + "="*80)
-        print("EVALUATION RESULTS (SINGLE-TURN JSON EVALUATION)")
+        print("EVALUATION RESULTS (FIXED v3.1.1)")
         print("="*80)
         print(f"\nModel: {results['model_path']}")
         print(f"Test examples: {results['valid_examples']}")
-        print(f"Output Mode: {results['output_mode']}")
-        print(f"Method: {results['evaluation_method']}")
+        print(f"Errors: {results['error_examples']}")
         print("\nOVERALL PERFORMANCE:")
         print(f"  Accuracy: {overall['accuracy']:.4f}")
         print(f"  Precision: {overall['precision']:.4f}")
@@ -661,7 +664,6 @@ class MalnutritionEvaluator:
         print(f"  Actual Absent  {cm['true_negative']:4d}   {cm['false_positive']:4d}")
         print(f"         Present {cm['false_negative']:4d}   {cm['true_positive']:4d}")
         print("="*80 + "\n")
-
 
 def main():
     parser = argparse.ArgumentParser(
