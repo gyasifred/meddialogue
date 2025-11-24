@@ -4,32 +4,6 @@ Malnutrition Model Evaluation Script - v3.1.0 (Single-Turn JSON Evaluation)
 =============================================================================
 Evaluates trained MedDialogue malnutrition models on test datasets.
 
-CRITICAL CHANGES:
-  - v3.1.0: Single-turn evaluation with comprehensive JSON response (fixes context issues)
-  - v3.0.0: Streamlined 3-step chain-of-thought matching training reasoning
-  - v2.0.0: 5-step logical multi-turn matching training order + garbage collection
-
-Uses single-turn inference with comprehensive JSON response:
-  - One question requesting complete assessment
-  - Returns: growth_assessment, diagnosis_reasoning, malnutrition_status
-  - Avoids context accumulation issues from multi-turn conversations
-
-Why Single-Turn:
-  - Prevents model from echoing/spilling clinical notes in responses
-  - Avoids context explosion in multi-turn conversations
-  - Cleaner JSON extraction without accumulated context
-  - More efficient inference (single pass)
-
-Forces JSON output with fields:
-  - growth_assessment: anthropometric measurements and trends
-  - diagnosis_reasoning: clinical reasoning and evidence synthesis
-  - malnutrition_status: "Malnutrition Present" or "Malnutrition Absent"
-
-Required CSV columns:
-  - txt: Clinical note text
-  - DEID: Patient identifier (for tracking)
-  - label: Binary label (1=Malnutrition Present, 0=Absent)
-
 Author: Frederick Gyasi (gyasi@musc.edu)
 Institution: Medical University of South Carolina, Biomedical Informatics Center
 Version: 3.1.0
@@ -223,9 +197,11 @@ class MalnutritionEvaluator:
 
         # Simple numbered questions - model returns JSON response
         evaluation_question = (
-            "1. What are ALL anthropometric measurements with DATES? Calculate trends and trajectories.\n"
-            "2. What's your diagnosis with complete clinical reasoning? Synthesize ALL evidence temporally.\n"
-            "3. Is malnutrition present or absent? State 'Malnutrition Present' or 'Malnutrition Absent'.\n\n"
+            "1. Summarize the presenting problem with timeline of events. What is the family's primary concern and how has it evolved over time? \n",
+            "2. Extract all anthropometric measurements with dates: weight, height/length, BMI, MUAC, head circumference. Calculate z-scores and percentiles using appropriate growth references (WHO 0-2y, CDC 2-20y)\n",
+            "3. Extract all nutrition-relevant laboratory values with dates: visceral proteins (albumin, prealbumin, total protein), CMP, CBC, micronutrients (25-OH vitamin D, iron studies, zinc, folate, B12), inflammatory markers (CRP, ESR). Document reference ranges and units.\n",
+            "4. What's your diagnosis with complete clinical reasoning? Synthesize ALL evidence temporally.\n"
+            "5. State the malnutrition classification clearly: 'Malnutrition present' or 'Malnutrition absent'.\n\n"
             "Return your response in JSON."
         )
 
