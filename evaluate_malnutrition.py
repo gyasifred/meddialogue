@@ -218,16 +218,20 @@ class MalnutritionEvaluator:
             Tuple of (combined_response, predicted_label, confidence)
         """
         print("\n" + "="*80)
-        print("SINGLE-TURN EVALUATION (Training-Style Questions)")
+        print("SINGLE-TURN EVALUATION (JSON Template with Questions)")
         print("="*80)
 
-        # Use EXACT training-style questions that match how model was trained
-        # Training data used specific, actionable questions - not abstract field names
-        # The model returns JSON with these question texts as keys
+        # Provide JSON template with field names as keys and questions as values
+        # Model completes by replacing questions with answers
+        json_template = {
+            "growth_assessment": "What are ALL anthropometric measurements with DATES? Calculate trends and trajectories.",
+            "diagnosis_reasoning": "What's your diagnosis with complete clinical reasoning? Synthesize ALL evidence temporally.",
+            "malnutrition_status": "Is malnutrition present or absent? State 'Malnutrition Present' or 'Malnutrition Absent'."
+        }
+
         evaluation_question = (
-            "What are ALL anthropometric measurements with DATES? Calculate trends and trajectories. "
-            "What's your diagnosis with complete clinical reasoning? Synthesize ALL evidence temporally. "
-            "Is malnutrition present or absent? State clearly."
+            "Complete this JSON by replacing each question with your answer:\n\n"
+            f"{json.dumps(json_template, indent=2)}"
         )
 
         print(f"\nQ: {evaluation_question}\n")
