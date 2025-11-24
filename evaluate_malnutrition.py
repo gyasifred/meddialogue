@@ -59,12 +59,26 @@ logger = logging.getLogger(__name__)
 
 
 # =================================================================
-# Evaluation Questions (from training templates)
+# Evaluation Questions (from training templates - Priority Order)
 # =================================================================
+# Priority 1: growth_and_anthropometrics, physical_exam, labs_and_screening
+# Priority 2: diagnosis_and_reasoning
+# Priority 3: malnutrition_status (MUST BE LAST)
 
 EVALUATION_QUESTIONS = [
+    # Priority 1 - Question 1: Growth & Anthropometrics
     "What are ALL anthropometric measurements with DATES? Calculate trends and trajectories.",
-    "What's your diagnosis with complete clinical reasoning? Synthesize ALL evidence temporally.",
+
+    # Priority 1 - Question 2: Physical Exam
+    "Document nutrition-focused physical exam findings: muscle mass, subcutaneous fat, edema, micronutrient deficiency signs. Do findings meet ASPEN criteria?",
+
+    # Priority 1 - Question 3: Labs & Screening
+    "Extract ALL nutrition-relevant laboratory values with dates: visceral proteins, CBC, micronutrients, inflammatory markers. Calculate trends and identify deficiencies.",
+
+    # Priority 2 - Question 4: Diagnosis & Reasoning
+    "What's your diagnosis with complete clinical reasoning? Synthesize ALL evidence (anthropometrics, physical exam, labs) temporally.",
+
+    # Priority 3 - Question 5: Malnutrition Status (FINAL)
     "Is malnutrition present or absent? State 'Malnutrition Present' or 'Malnutrition Absent'."
 ]
 
@@ -89,10 +103,12 @@ class MalnutritionEvaluator:
         r'\bmalnutrition\s+(is\s+)?present\b',
         r'\byes\b.*(malnutrition|malnourished)\b',
         r'\bmalnutrition\s+confirmed\b',
-        r'\b(is\s+)?malnourished\b',
+        r'(?<!\bnot\s)(?<!\bno\s)\b(is\s+)?malnourished\b',  # malnourished but NOT preceded by "not" or "no"
         r'\bdiagnosis:?\s+malnutrition\b',
         r'\bhas\s+malnutrition\b',
-        r'\bpositive\s+for\s+malnutrition\b'
+        r'\bpositive\s+for\s+malnutrition\b',
+        r'\bpatient\s+(is\s+)?malnourished\b',
+        r'\bchild\s+(is\s+)?malnourished\b'
     ]
 
     ABSENT_PATTERNS = [
@@ -114,7 +130,7 @@ class MalnutritionEvaluator:
         chat_template: str = None,
         temperature: float = 0.1,
         max_seq_length: int = 4096,
-        max_new_tokens: int = 1024,
+        max_new_tokens: int = 2048,
         cuda_device: Optional[int] = None
     ):
         """Initialize evaluator with model configuration."""
