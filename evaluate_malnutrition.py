@@ -292,22 +292,52 @@ class MalnutritionEvaluator:
 
         all_responses = []
 
-        logger.info(f"\n{'='*80}")
-        logger.info(f"Evaluating Patient: {patient_id}")
-        logger.info(f"{'='*80}")
+        print(f"\n{'='*80}")
+        print(f"EVALUATING PATIENT: {patient_id}")
+        print(f"{'='*80}")
+        print(f"Clinical Note Length: {len(clinical_note)} characters")
+        print(f"{'='*80}\n")
 
         # Ask questions in order
         for i, question in enumerate(EVALUATION_QUESTIONS, 1):
-            logger.info(f"\nTurn {i}/{len(EVALUATION_QUESTIONS)}")
-            logger.info(f"Q: {question[:80]}...")
+            print(f"\n{'='*80}")
+            print(f"TURN {i}/{len(EVALUATION_QUESTIONS)}")
+            print(f"{'='*80}")
+
+            # Show what's being passed
+            if i == 1:
+                print(f"\n📝 INPUT TO MODEL (Turn {i}):")
+                print(f"{'='*80}")
+                print(f"CLINICAL NOTE (first {500} chars):")
+                print(f"{'-'*80}")
+                print(clinical_note[:500] + "..." if len(clinical_note) > 500 else clinical_note)
+                print(f"{'-'*80}")
+                print(f"\nQUESTION {i}:")
+                print(f"{question}")
+                print(f"{'='*80}")
+                print(f"\n⚠️ NOTE: Clinical note is included ONLY in this first message")
+                print(f"⚠️ Conversation history: 0 previous turns")
+            else:
+                print(f"\n📝 INPUT TO MODEL (Turn {i}):")
+                print(f"{'='*80}")
+                print(f"QUESTION {i}:")
+                print(f"{question}")
+                print(f"{'='*80}")
+                print(f"\n⚠️ NOTE: NO clinical note (already sent in Turn 1)")
+                print(f"⚠️ Conversation history: {len(self.current_conversation)//2} previous turns")
+                print(f"⚠️ Model sees ALL previous questions and answers")
 
             # Include clinical note only in first message
             clinical_note_to_pass = clinical_note if i == 1 else None
 
+            print(f"\n⏳ Generating response...")
             response = self.generate_response(question, clinical_note_to_pass)
             all_responses.append(response)
 
-            logger.info(f"A: {response[:200]}...")
+            print(f"\n✅ RESPONSE {i}:")
+            print(f"{'='*80}")
+            print(response)
+            print(f"{'='*80}\n")
 
         # Extract malnutrition status from final response
         final_response = all_responses[-1]
