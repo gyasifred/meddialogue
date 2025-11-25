@@ -757,7 +757,9 @@ class DataPrep:
             output_format
         )
 
+        # Build conversation with system prompt
         conversation = [
+            {"role": "system", "content": self.task_config.get_system_prompt()},
             {"role": "user", "content": f"{question}\n\nCLINICAL NOTE:\n{clinical_note}"},
             {"role": "assistant", "content": response}
         ]
@@ -782,18 +784,22 @@ class DataPrep:
         """Create multi-turn conversation example."""
         clinical_note = preprocess_clinical_text(row[self.task_config.input_field])
         output_data = {field: row.get(field, "") for field in self.task_config.output_fields}
-        
-        conversation = []
+
+        # Initialize conversation with system prompt
+        conversation = [
+            {"role": "system", "content": self.task_config.get_system_prompt()}
+        ]
+
         available_fields = self.task_config.output_fields.copy()
         random.shuffle(available_fields)
-        
+
         num_fields = len(available_fields)
         note_length = len(clinical_note)
         max_q_len = self._calculate_max_question_length(note_length)
-        
+
         logger.debug(f"Creating multi-turn: note_length={note_length}, "
                     f"max_question_length={max_q_len}, fields={num_fields}")
-        
+
         # Turn 1: First questions
         num_first = min(2, len(available_fields))
         first_fields = available_fields[:num_first]
@@ -809,7 +815,7 @@ class DataPrep:
             first_ordered_pairs,
             OutputFormat.TEXT
         )
-        
+
         conversation.extend([
             {"role": "user", "content": f"{first_q}\n\nCLINICAL NOTE:\n{clinical_note}"},
             {"role": "assistant", "content": first_r}
