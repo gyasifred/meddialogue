@@ -52,6 +52,17 @@ except ImportError as e:
     print("Install required packages: pip install unsloth gradio pandas")
     sys.exit(1)
 
+# Import system prompts
+try:
+    from malnutrition_system_prompts import (
+        GRADIO_DEFAULT_SYSTEM_PROMPT,
+        GRADIO_MALNUTRITION_SYSTEM_PROMPT
+    )
+except ImportError:
+    print("Warning: malnutrition_system_prompts.py not found. Using default prompts.")
+    GRADIO_DEFAULT_SYSTEM_PROMPT = """You are a helpful AI clinical assistant with expertise in medical documentation analysis and clinical reasoning."""
+    GRADIO_MALNUTRITION_SYSTEM_PROMPT = """You are an expert pediatric nutritionist specializing in malnutrition assessment using ASPEN, WHO, and CDC guidelines."""
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -540,6 +551,11 @@ class ClinicalConversationEngine:
         # Performance tracking
         self.generation_count = 0  # Track number of generations for cache optimization
 
+        # System prompts
+        self.default_system_prompt = GRADIO_DEFAULT_SYSTEM_PROMPT
+        self.malnutrition_system_prompt = GRADIO_MALNUTRITION_SYSTEM_PROMPT
+        self.current_system_prompt = self.default_system_prompt  # Start with default
+
         logger.info(f"Clinical Conversation Engine initialized")
     
     def load_model(self):
@@ -620,7 +636,25 @@ class ClinicalConversationEngine:
         self.current_conversation = []
         self.clinical_note_included = False
         self.generation_count = 0  # Reset performance counter
-    
+
+    def set_system_prompt(self, prompt_type: str = "default", custom_prompt: str = None):
+        """
+        Set system prompt for conversation.
+
+        Args:
+            prompt_type: One of "default", "malnutrition", "custom"
+            custom_prompt: Custom prompt text (required if prompt_type="custom")
+        """
+        if prompt_type == "malnutrition":
+            self.current_system_prompt = self.malnutrition_system_prompt
+            logger.info("System prompt set to: Malnutrition-Specific")
+        elif prompt_type == "custom" and custom_prompt:
+            self.current_system_prompt = custom_prompt
+            logger.info("System prompt set to: Custom")
+        else:
+            self.current_system_prompt = self.default_system_prompt
+            logger.info("System prompt set to: Default (General Clinical)")
+
     def generate_response(
         self,
         user_message: str,
@@ -665,9 +699,13 @@ class ClinicalConversationEngine:
             self.memory.add_message(session_id, "user", user_message)
         
         try:
-            # NO system prompt - pure conversation
+            # Build conversation with current system prompt
+            conversation_with_system = [
+                {"role": "system", "content": self.current_system_prompt}
+            ] + self.current_conversation
+
             formatted_text = self.tokenizer.apply_chat_template(
-                self.current_conversation,
+                conversation_with_system,
                 tokenize=False,
                 add_generation_prompt=True
             )
@@ -903,14 +941,48 @@ def create_professional_interface(engine: ClinicalConversationEngine) -> gr.Bloc
                             load_patient_btn = gr.Button("👤 Load Patient Note", size="sm")
                         
                         gr.Markdown("---")
-                        
+
                         clinical_note = gr.Textbox(
                             label="Clinical Note (Optional)",
                             placeholder="Clinical note will be sent ONLY when loaded and ONLY with first message...",
                             lines=10,
                             max_lines=15
                         )
-                        
+
+                        with gr.Accordion("⚙️ System Prompt Settings", open=False):
+                            gr.Markdown("**Configure AI Assistant Behavior**")
+
+                            prompt_type_selector = gr.Radio(
+                                choices=[
+                                    "Default (General Clinical)",
+                                    "Malnutrition-Specific",
+                                    "Custom"
+                                ],
+                                value="Default (General Clinical)",
+                                label="System Prompt Type",
+                                info="Choose the AI assistant's expertise mode"
+                            )
+
+                            custom_prompt_box = gr.Textbox(
+                                label="Custom System Prompt",
+                                placeholder="Enter your custom system prompt here...",
+                                lines=8,
+                                max_lines=12,
+                                visible=False,
+                                info="Define custom task description and guidelines"
+                            )
+
+                            apply_prompt_btn = gr.Button(
+                                "✅ Apply System Prompt",
+                                size="sm",
+                                variant="primary"
+                            )
+
+                            prompt_status = gr.Markdown(
+                                "**Current:** Default (General Clinical)",
+                                elem_classes="compact-section"
+                            )
+
                         with gr.Accordion("📝 Example Cases", open=False):
                             example_dropdown = gr.Dropdown(
                                 choices=list(EXAMPLE_CASES.keys()),
@@ -1344,7 +1416,41 @@ def create_professional_interface(engine: ClinicalConversationEngine) -> gr.Bloc
         
         def refresh_system_info():
             return engine.get_model_info(), engine.memory.get_memory_stats()
-        
+
+        def toggle_custom_prompt_visibility(prompt_type_choice):
+            """Show/hide custom prompt box based on selection."""
+            is_custom = (prompt_type_choice == "Custom")
+            return gr.update(visible=is_custom)
+
+        def apply_system_prompt(prompt_type_choice, custom_prompt_text):
+            """Apply the selected system prompt to the engine."""
+            # Map UI labels to internal types
+            type_map = {
+                "Default (General Clinical)": "default",
+                "Malnutrition-Specific": "malnutrition",
+                "Custom": "custom"
+            }
+
+            prompt_type = type_map.get(prompt_type_choice, "default")
+
+            # Validate custom prompt
+            if prompt_type == "custom":
+                if not custom_prompt_text or not custom_prompt_text.strip():
+                    return "⚠️ Please enter a custom prompt before applying"
+
+            # Apply to engine
+            engine.set_system_prompt(prompt_type, custom_prompt_text)
+
+            # Return status message
+            if prompt_type == "malnutrition":
+                status = "**Current:** Malnutrition-Specific"
+            elif prompt_type == "custom":
+                status = "**Current:** Custom (user-defined)"
+            else:
+                status = "**Current:** Default (General Clinical)"
+
+            return f"✅ System prompt applied!\n\n{status}"
+
         # ====================================================================
         # CONNECT EVENTS
         # ====================================================================
@@ -1480,7 +1586,20 @@ def create_professional_interface(engine: ClinicalConversationEngine) -> gr.Bloc
             fn=refresh_system_info,
             outputs=[model_info_display, memory_stats_display]
         )
-        
+
+        # System prompt controls
+        prompt_type_selector.change(
+            fn=toggle_custom_prompt_visibility,
+            inputs=[prompt_type_selector],
+            outputs=[custom_prompt_box]
+        )
+
+        apply_prompt_btn.click(
+            fn=apply_system_prompt,
+            inputs=[prompt_type_selector, custom_prompt_box],
+            outputs=[prompt_status]
+        )
+
         interface.load(
             fn=update_session_display,
             inputs=[session_state],
