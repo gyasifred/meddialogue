@@ -40,6 +40,13 @@ from meddialogue import (
     OutputFormat
 )
 
+# Import training system prompt
+try:
+    from malnutrition_system_prompts import TRAINING_SYSTEM_PROMPT
+except ImportError:
+    print("Warning: malnutrition_system_prompts.py not found. Using default prompt.")
+    TRAINING_SYSTEM_PROMPT = """You are an expert pediatric nutritionist trained in evidence-based malnutrition assessment using ASPEN, WHO, and CDC guidelines."""
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -578,15 +585,7 @@ class MalnutritionTaskConfig:
             medical_terminology=cls.MEDICAL_TERMINOLOGY,
             diagnostic_codes=cls.DIAGNOSTIC_CODES,
             severity_levels=cls.SEVERITY_LEVELS,
-            default_system_prompt=(
-                "You are an expert pediatric nutritionist and clinician specializing in malnutrition assessment. "
-                "You excel at temporal reasoning, analyzing trends over time, and making predictions about clinical "
-                "trajectories. You provide comprehensive assessments that integrate all available data temporally, "
-                "reason through incomplete information, and develop actionable plans with specific monitoring schedules. "
-                "You use evidence-based guidelines (ASPEN, WHO) and explain your clinical reasoning clearly. "
-                "When data is incomplete, you recommend specific next steps with rationale. You think ahead about "
-                "expected trajectories, monitoring schedules, and escalation criteria."
-            )
+            default_system_prompt=TRAINING_SYSTEM_PROMPT
         )
 
 

@@ -49,6 +49,13 @@ except ImportError:
     print("Error: unsloth not installed. Install with: pip install unsloth")
     sys.exit(1)
 
+# Import system prompt
+try:
+    from malnutrition_system_prompts import EVALUATION_SYSTEM_PROMPT
+except ImportError:
+    print("Warning: malnutrition_system_prompts.py not found. Using default prompt.")
+    EVALUATION_SYSTEM_PROMPT = """You are an expert pediatric nutritionist performing malnutrition assessment using ASPEN, WHO, and CDC guidelines."""
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -249,9 +256,14 @@ class MalnutritionEvaluator:
         self.current_conversation.append({"role": "user", "content": actual_message})
 
         try:
-            # Apply chat template to full conversation history
+            # Build conversation with system prompt
+            conversation_with_system = [
+                {"role": "system", "content": EVALUATION_SYSTEM_PROMPT}
+            ] + self.current_conversation
+
+            # Apply chat template to full conversation history (including system prompt)
             formatted_text = self.tokenizer.apply_chat_template(
-                self.current_conversation,
+                conversation_with_system,
                 tokenize=False,
                 add_generation_prompt=True
             )
