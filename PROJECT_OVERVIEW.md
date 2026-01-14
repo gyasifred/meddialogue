@@ -1,4 +1,4 @@
-# MedDialogue: Pediatric Malnutrition Assessment
+# MedDialogue: General-Purpose Medical Dialogue Fine-Tuning Framework
 
 ---
 
@@ -24,53 +24,64 @@
 
 ## Project Summary
 
-MedDialogue is a clinical NLP framework for fine-tuning large language models (LLMs) on medical dialogue tasks, with current implementation focused on pediatric malnutrition assessment using ASPEN, WHO, and CDC guidelines.
+MedDialogue is a general-purpose framework for fine-tuning large language models (LLMs) on ANY medical dialogue task through conversational learning. The framework is task-agnostic and contains no domain-specific code - users define their own tasks, output fields, and question templates.
 
-The framework enables training domain-specific conversational models that perform multi-turn clinical assessments, supporting evidence-based diagnostic reasoning, temporal pattern analysis, and structured output generation (TEXT, JSON, XML, Markdown).
+Unlike traditional instruction fine-tuning that produces brittle models failing on question variations, MedDialogue trains models through natural multi-turn clinical dialogues, enabling robust handling of varied questions, follow-ups, and context.
 
 ### Key Research Questions
 
-1. **Can fine-tuned LLMs accurately assess pediatric malnutrition using clinical notes and ASPEN diagnostic criteria?**
+1. **Can conversational fine-tuning produce more robust medical AI models than traditional instruction fine-tuning?**
 
-2. **How effective is multi-turn conversational training for clinical reasoning tasks compared to single-turn approaches?**
+2. **How effective are multi-turn dialogue patterns in teaching clinical reasoning compared to single-turn approaches?**
 
 ---
 
-## Project Experiments
+## Framework Capabilities
 
-### Current Implementation
+### Core Architecture
 
 | Component | Description |
 |-----------|-------------|
-| **Task Domain** | Pediatric malnutrition assessment |
-| **Clinical Guidelines** | ASPEN, WHO, CDC |
-| **Assessment Fields** | 11 domains (case presentation, clinical symptoms, growth/anthropometrics, physical exam, nutrition/intake, labs/screening, diagnosis/reasoning, malnutrition status, care plan, social context, clinical insights) |
-| **Question Templates** | 110 total (10 per field) |
-| **Output Formats** | TEXT (40%), JSON (35%), XML (10%), Markdown (15%) |
-| **Supported Models** | LLaMA 3.1 8B, Phi-4, Mistral 7B, Qwen 2.5 7B |
+| **Task Definition** | User-defined via `TaskConfig` (task name, input field, output fields, question templates) |
+| **Conversation Generation** | Configurable via `ConversationConfig` (turn ratios, typos, validation split) |
+| **Question Combination** | 16 styles: 7 grammatical variations + 9 logical reasoning patterns |
+| **Output Formats** | TEXT, JSON, XML, Markdown with configurable weighted ratios |
 | **Training Method** | LoRA/QLoRA fine-tuning with Unsloth optimization |
-| **Quantization** | 4-bit (bnb-4bit) |
+| **Data Mapping** | 1:1 mapping (each clinical note generates ONE training conversation) |
 
-### Evaluation Approach
+### Supported Models
 
-| Metric | Description |
-|--------|-------------|
-| **Classification** | Binary malnutrition present/absent |
-| **Primary Metrics** | Accuracy, Precision, Recall, F1-Score, Specificity |
-| **Additional Metrics** | MCC, AUC-ROC |
-| **Evaluation Pattern** | Multi-turn conversation (6 questions per patient) |
+| Model Family | Variants | Max Sequence Length |
+|--------------|----------|---------------------|
+| LLaMA | 3.1, 3.2 (8B, 70B) | 32,768 tokens |
+| Phi | Phi-4 (14B) | 16,384 tokens |
+| Mistral | 7B, Nemo | 32,768 tokens |
+| Qwen | 2.5 (7B, 14B, 32B) | 32,768 tokens |
 
-### Training Configuration
+### Question Generation Styles
 
-| Parameter | Default Value |
-|-----------|---------------|
-| Max Sequence Length | 16,384 tokens |
-| Batch Size | 2 |
-| Learning Rate | 2e-4 |
-| LoRA Rank | 16 |
-| LoRA Alpha | 16 |
-| Gradient Accumulation | 4 steps |
-| Precision | BF16 |
+| Category | Styles | Description |
+|----------|--------|-------------|
+| **Grammatical (1-7)** | Sequential, Conjunctions, Transitional, Numbered, Natural, Directive, Mixed | Work with any question order |
+| **Logical (8-16)** | Causal, Conditional, Prioritized, Comparative, Temporal, Hierarchical, Dialectical, Exploratory, Dependency | Require ordered questions for reasoning flow |
+
+---
+
+## Example Use Case: Pediatric Malnutrition Assessment
+
+The repository includes a demonstration using pediatric malnutrition assessment (ASPEN/WHO/CDC guidelines) to show how to use MedDialogue:
+
+| File | Purpose |
+|------|---------|
+| `train_malnutrition.py` | Training script demonstrating TaskConfig setup |
+| `evaluate_malnutrition.py` | Evaluation script with classification metrics |
+| `malnutrition_system_prompts.py` | Domain-specific system prompts |
+
+This example demonstrates:
+- 11 clinical output fields
+- 110 question templates (10 per field)
+- Field ordering following clinical logic (assess, diagnose, plan)
+- Multi-turn clinical dialogue patterns
 
 ---
 
@@ -80,40 +91,27 @@ The framework enables training domain-specific conversational models that perfor
 
 **GitHub:** https://github.com/gyasifred/meddialogue
 
-### Framework Components
+### Core Framework Modules
 
 | Module | Function |
 |--------|----------|
-| `meddialogue/core.py` | Main MedDialogue class orchestrating training pipeline |
-| `meddialogue/train.py` | Training utilities with conversation generation |
-| `meddialogue/models.py` | Model loading, LoRA application, registry |
-| `meddialogue/inference.py` | Single/multi-turn inference pipeline |
-| `meddialogue/data_prep.py` | Data preprocessing and conversation formatting |
-| `meddialogue/config.py` | Configuration dataclasses (Task, Model, LoRA, Training, Safety, Conversation) |
+| `meddialogue/core.py` | Main `MedDialogue` class - high-level training interface |
+| `meddialogue/config.py` | Configuration dataclasses (`TaskConfig`, `ConversationConfig`, `TrainingConfig`, `LoRAConfig`, `ModelConfig`) |
+| `meddialogue/data_prep.py` | `DataPrep` class - conversation generation with 16 question styles |
+| `meddialogue/train.py` | `Trainer` class - training pipeline with Unsloth |
+| `meddialogue/inference.py` | `InferencePipeline` - single/multi-turn inference |
+| `meddialogue/models.py` | `ModelRegistry` - model loading and LoRA application |
 | `meddialogue/utils.py` | Text processing, output formatting, parsing utilities |
-| `train_malnutrition.py` | Malnutrition-specific training script |
-| `evaluate_malnutrition.py` | Multi-turn evaluation with classification metrics |
-| `gradio_chat_v1.py` | Interactive web interface for clinical consultation |
-| `malnutrition_system_prompts.py` | Domain-specific system prompts |
+| `meddialogue/safety.py` | Safety stubs for backward compatibility |
 
-### Datasets
+### Data Requirements
 
-**Input Requirements:**
+Users provide CSV data with:
 
-| Column | Description |
-|--------|-------------|
-| `txt` | Clinical note text |
-| `input_label_value` | Binary label (0=absent, 1=present) |
-| `case_presentation` | Case summary |
-| `clinical_symptoms_and_signs` | Symptom documentation |
-| `growth_and_anthropometrics` | Growth measurements |
-| `physical_exam` | Physical examination findings |
-| `nutrition_and_intake` | Dietary intake information |
-| `diagnosis_and_reasoning` | Clinical reasoning |
-| `labs_and_screening` | Laboratory values |
-| `care_plan` | Treatment recommendations |
-| `clinical_insights` | Key insights |
-| `social_context` (optional) | Social determinants |
+| Required | Description |
+|----------|-------------|
+| Input field | Clinical text column (configurable, default: `clinical_note`) |
+| Output fields | User-defined columns matching `TaskConfig.output_fields` |
 
 ---
 
@@ -143,9 +141,9 @@ The framework enables training domain-specific conversational models that perfor
 | Transformers | Hugging Face model infrastructure |
 | PEFT | Parameter-efficient fine-tuning (LoRA) |
 | PyTorch | Deep learning framework |
-| Gradio | Interactive web interface |
-| scikit-learn | Evaluation metrics |
+| Datasets | HuggingFace dataset handling |
 | pandas | Data processing |
+| scikit-learn | Evaluation metrics |
 
 ---
 
